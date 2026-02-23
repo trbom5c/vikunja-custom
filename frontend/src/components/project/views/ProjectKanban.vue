@@ -14,6 +14,16 @@
 					:project-id="projectId"
 					@update:modelValue="updateFilters"
 				/>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="layer-group"
+					:shadow="false"
+					class="mis-2"
+					@click="openCreateFromTemplateModal"
+				>
+					{{ $t('task.template.fromTemplate') }}
+				</XButton>
 			</div>
 		</template>
 
@@ -221,6 +231,7 @@
 												:project-id="projectId"
 												@taskCompletedRecurring="handleRecurringTaskCompletion"
 												@duplicateTask="openDuplicateTaskModal"
+												@saveAsTemplate="openSaveAsTemplateModal"
 											/>
 										</div>
 									</template>
@@ -282,6 +293,20 @@
 					@close="showDuplicateTaskModal = false"
 					@duplicated="handleTaskDuplicated"
 				/>
+
+				<CreateFromTemplateModal
+					:enabled="showCreateFromTemplateModal"
+					:default-project-id="projectId"
+					@close="showCreateFromTemplateModal = false"
+					@created="handleTaskCreatedFromTemplate"
+				/>
+
+				<SaveAsTemplateModal
+					:enabled="showSaveAsTemplateModal"
+					:task="taskToSaveAsTemplate"
+					@close="showSaveAsTemplateModal = false"
+					@saved="() => {}"
+				/>
 			</div>
 		</template>
 	</ProjectWrapper>
@@ -311,6 +336,8 @@ import KanbanCard from '@/components/tasks/partials/KanbanCard.vue'
 import Dropdown from '@/components/misc/Dropdown.vue'
 import DropdownItem from '@/components/misc/DropdownItem.vue'
 import DuplicateTaskModal from '@/components/tasks/partials/DuplicateTaskModal.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import SaveAsTemplateModal from '@/components/tasks/partials/SaveAsTemplateModal.vue'
 
 import {
 	type CollapsedBuckets,
@@ -381,6 +408,10 @@ const bucketTitleEditable = ref(false)
 
 const showDuplicateTaskModal = ref(false)
 const taskToDuplicate = ref<ITask | null>(null)
+
+const showCreateFromTemplateModal = ref(false)
+const showSaveAsTemplateModal = ref(false)
+const taskToSaveAsTemplate = ref<ITask | null>(null)
 
 const newTaskText = ref('')
 const showNewTaskInput = ref<IBucket['id'] | null>(null)
@@ -877,6 +908,21 @@ function openDuplicateTaskModal(task: ITask) {
 function handleTaskDuplicated(duplicatedTask: ITask) {
 	// If the task was duplicated into the same project, reload the kanban board to show it
 	if (duplicatedTask.projectId === projectId.value) {
+		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+	}
+}
+
+function openSaveAsTemplateModal(task: ITask) {
+	taskToSaveAsTemplate.value = task
+	showSaveAsTemplateModal.value = true
+}
+
+function openCreateFromTemplateModal() {
+	showCreateFromTemplateModal.value = true
+}
+
+function handleTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === projectId.value) {
 		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
 	}
 }
