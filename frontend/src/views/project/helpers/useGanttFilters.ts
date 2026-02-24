@@ -104,10 +104,11 @@ function ganttFiltersToApiParams(filters: GanttFilters): TaskFilterParams {
 		'(due_date >= "' + dateFrom + '" && due_date <= "' + dateTo + '")'
 
 	// Always include incomplete tasks (overdue / out-of-range but not done)
+	// Also include recently completed tasks (last 48h) so users see what just got done
 	// When showDoneTasks is on, fetch everything (no done filter)
 	const filter = filters.showDoneTasks
 		? '(' + dateRangeFilter + ')'
-		: '((' + dateRangeFilter + ') || (done = false))'
+		: '((' + dateRangeFilter + ') || (done = false) || (done_at > "now-2d"))'
 
 	return {
 		sort_by: ['start_date', 'done', 'id'],

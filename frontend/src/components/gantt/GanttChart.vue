@@ -240,9 +240,13 @@ watch(
 		const filteredTasks = Array.from(tasks.value.values()).filter(task => {
 			const hasAnyDate = Boolean(task.startDate || task.endDate || task.dueDate)
 
-			// Hide done tasks unless checkbox is on
+			// Hide done tasks unless checkbox is on, but always show recently completed (48h)
 			if (task.done && !filters.value.showDoneTasks) {
-				return false
+				const doneAt = task.doneAt ? new Date(task.doneAt).getTime() : 0
+				const cutoff = Date.now() - (48 * 60 * 60 * 1000)
+				if (doneAt < cutoff) {
+					return false
+				}
 			}
 
 			if (!filters.value.showTasksWithoutDates && !hasAnyDate) {

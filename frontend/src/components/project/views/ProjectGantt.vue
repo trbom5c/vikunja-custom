@@ -73,10 +73,44 @@
 						v-if="canWrite"
 						@createTask="addGanttTask"
 					/>
+					<div
+						v-if="canWrite"
+						class="gantt-bottom-actions"
+					>
+						<XButton
+							variant="secondary"
+							icon="layer-group"
+							:shadow="false"
+							@click="showCreateFromTemplateModal = true"
+						>
+							{{ $t('task.template.fromTemplate') }}
+						</XButton>
+						<XButton
+							variant="secondary"
+							icon="link"
+							:shadow="false"
+							@click="showCreateFromChainModal = true"
+						>
+							{{ $t('task.chain.createFromChain') }}
+						</XButton>
+					</div>
 				</Card>
 			</div>
 		</template>
 	</ProjectWrapper>
+
+	<CreateFromTemplateModal
+		:enabled="showCreateFromTemplateModal"
+		:default-project-id="filters.projectId"
+		@close="showCreateFromTemplateModal = false"
+		@created="onTaskCreatedFromTemplate"
+	/>
+	<CreateFromChainModal
+		:enabled="showCreateFromChainModal"
+		:project-id="filters.projectId"
+		@close="showCreateFromChainModal = false"
+		@created="loadTasks()"
+	/>
 </template>
 
 <script setup lang="ts">
@@ -96,6 +130,8 @@ import FormField from '@/components/input/FormField.vue'
 
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import {useGanttFilters} from '../../../views/project/helpers/useGanttFilters'
 import {PERMISSIONS} from '@/constants/permissions'
 
@@ -119,6 +155,8 @@ const {route, viewId} = toRefs(props)
 
 const subprojectParams = ref<Record<string, unknown>>({})
 const subprojectColorMap = ref<Map<number, string>>(new Map())
+const showCreateFromTemplateModal = ref(false)
+const showCreateFromChainModal = ref(false)
 
 function onSubprojectToggle(enabled: boolean) {
 	if (enabled) {
@@ -142,6 +180,12 @@ function onExcludeChange(ids: string) {
 
 function onColorMapChange(map: Map<number, string>) {
 	subprojectColorMap.value = map
+}
+
+function onTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === filters.value.projectId) {
+		loadTasks()
+	}
 }
 
 const {
@@ -206,6 +250,12 @@ const flatPickerConfig = computed(() => ({
 <style lang="scss" scoped>
 .gantt-chart-container {
 	padding-block-end: 1rem;
+}
+
+.gantt-bottom-actions {
+	display: flex;
+	gap: .5rem;
+	padding: .5rem 1rem;
 }
 
 .gantt-options {
