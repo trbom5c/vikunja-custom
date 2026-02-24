@@ -69,26 +69,27 @@
 						:subproject-color-map="subprojectColorMap"
 						@update:task="updateTask"
 					/>
-					<TaskForm
-						v-if="canWrite"
-						@createTask="addGanttTask"
-					/>
-					<div
-						v-if="canWrite"
-						class="gantt-bottom-actions"
-					>
+					<div class="gantt-bottom-bar">
+						<TaskForm
+							v-if="canWrite"
+							@createTask="addGanttTask"
+						/>
 						<XButton
+							v-if="canWrite"
 							variant="secondary"
 							icon="layer-group"
 							:shadow="false"
+							class="gantt-action-btn"
 							@click="showCreateFromTemplateModal = true"
 						>
 							{{ $t('task.template.fromTemplate') }}
 						</XButton>
 						<XButton
+							v-if="canWrite"
 							variant="secondary"
 							icon="link"
 							:shadow="false"
+							class="gantt-action-btn"
 							@click="showCreateFromChainModal = true"
 						>
 							{{ $t('task.chain.createFromChain') }}
@@ -252,10 +253,28 @@ const flatPickerConfig = computed(() => ({
 	padding-block-end: 1rem;
 }
 
-.gantt-bottom-actions {
+.gantt-bottom-bar {
 	display: flex;
+	align-items: center;
 	gap: .5rem;
-	padding: .5rem 1rem;
+	padding: .25rem .5rem;
+	flex-wrap: wrap;
+
+	:deep(.task-form) {
+		flex: 0 0 auto;
+	}
+}
+
+.gantt-action-btn {
+	font-size: .8rem;
+	padding-block: .35rem;
+	padding-inline: .75rem;
+	opacity: .7;
+	transition: opacity .15s;
+
+	&:hover {
+		opacity: 1;
+	}
 }
 
 .gantt-options {
