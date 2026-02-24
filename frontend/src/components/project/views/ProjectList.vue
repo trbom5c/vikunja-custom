@@ -24,6 +24,16 @@
 				>
 					{{ $t('task.template.fromTemplate') }}
 				</XButton>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="link"
+					:shadow="false"
+					class="mis-2"
+					@click="showCreateFromChainModal = true"
+				>
+					{{ $t('task.chain.createFromChain') }}
+				</XButton>
 				<SubprojectFilter
 					:project-id="projectId"
 					@update:includeSubprojects="onSubprojectToggle"
@@ -109,6 +119,12 @@
 		@close="showCreateFromTemplateModal = false"
 		@created="handleTaskCreatedFromTemplate"
 	/>
+	<CreateFromChainModal
+		:enabled="showCreateFromChainModal"
+		:project-id="projectId"
+		@close="showCreateFromChainModal = false"
+		@created="loadTasks(1)"
+	/>
 </template>
 
 
@@ -123,6 +139,7 @@ import SingleTaskInProject from '@/components/tasks/partials/SingleTaskInProject
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
 import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
 import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import Nothing from '@/components/misc/Nothing.vue'
 import Pagination from '@/components/misc/Pagination.vue'
 import {ALPHABETICAL_SORT} from '@/components/project/partials/Filters.vue'
@@ -155,6 +172,7 @@ defineOptions({name: 'List'})
 
 const ctaVisible = ref(false)
 const showCreateFromTemplateModal = ref(false)
+const showCreateFromChainModal = ref(false)
 
 const drag = ref(false)
 
