@@ -76,9 +76,8 @@
 						/>
 						<XButton
 							v-if="canWrite"
-							variant="secondary"
+							variant="primary"
 							icon="layer-group"
-							:shadow="false"
 							class="gantt-action-btn"
 							@click="showCreateFromTemplateModal = true"
 						>
@@ -86,9 +85,8 @@
 						</XButton>
 						<XButton
 							v-if="canWrite"
-							variant="secondary"
+							variant="primary"
 							icon="link"
-							:shadow="false"
 							class="gantt-action-btn"
 							@click="showCreateFromChainModal = true"
 						>
@@ -259,22 +257,12 @@ const flatPickerConfig = computed(() => ({
 	gap: .5rem;
 	padding: .25rem .5rem;
 	flex-wrap: wrap;
-
-	:deep(.task-form) {
-		flex: 0 0 auto;
-	}
 }
 
 .gantt-action-btn {
 	font-size: .8rem;
-	padding-block: .35rem;
+	padding-block: .4rem;
 	padding-inline: .75rem;
-	opacity: .7;
-	transition: opacity .15s;
-
-	&:hover {
-		opacity: 1;
-	}
 }
 
 .gantt-options {
