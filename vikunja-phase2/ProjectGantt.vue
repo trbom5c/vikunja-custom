@@ -255,8 +255,19 @@ const flatPickerConfig = computed(() => ({
 	display: flex;
 	align-items: center;
 	gap: .5rem;
-	padding: .25rem .5rem;
+	padding: .5rem;
 	flex-wrap: wrap;
+
+	:deep(.add-new-task) {
+		padding: 0;
+		margin: 0;
+
+		.button {
+			font-size: .8rem;
+			padding-block: .4rem;
+			padding-inline: .75rem;
+		}
+	}
 }
 
 .gantt-action-btn {
