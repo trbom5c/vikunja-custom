@@ -106,7 +106,7 @@ export type UseGanttFiltersReturn =
 	UseRouteFiltersReturn<GanttFilters> &
 	UseGanttTaskListReturn
 
-export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref<IProjectView['id']>): UseGanttFiltersReturn {
+export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref<IProjectView['id']>, extraParams?: Ref<Record<string, unknown>>): UseGanttFiltersReturn {
 	const viewFiltersStore = useViewFiltersStore()
 
 	const {
@@ -143,7 +143,7 @@ export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref
 		isLoading,
 		addTask,
 		updateTask,
-	} = useGanttTaskList<GanttFilters>(filters, ganttFiltersToApiParams, viewId)
+	} = useGanttTaskList<GanttFilters>(filters, ganttFiltersToApiParams, viewId, true, extraParams)
 
 	return {
 		filters,
