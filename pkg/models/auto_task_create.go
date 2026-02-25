@@ -33,7 +33,7 @@ import (
 // Rules:
 //   - Only one open (not done) instance per template can exist at a time
 //   - If the previous instance isn't done, no new one is created (it just goes overdue)
-//   - next_due_at is recalculated from the last completion time, not creation time
+//   - next_due_at is recalculated anchored to the generate-at time, not completion time
 func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 	now := time.Now()
 
@@ -95,7 +95,7 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 			if needsAdvance {
 				completedAt := lastDone.DoneAt
 				tmpl.LastCompletedAt = &completedAt
-				nextDue := advanceFromTime(completedAt, tmpl.IntervalValue, tmpl.IntervalUnit)
+				nextDue := advanceNextDueAt(tmpl)
 				tmpl.NextDueAt = &nextDue
 				_, _ = s.ID(tmpl.ID).Cols("last_completed_at", "next_due_at").Update(tmpl)
 
@@ -151,7 +151,15 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 }
 
 // OnAutoTaskCompleted should be called when a task with auto_template_id is marked done.
-// It recalculates the next_due_at based on the completion time.
+// It recalculates the next_due_at anchored to the generate-at time, not completion time.
+//
+// The key insight: next_due_at should always be "the next occurrence of the
+// generate-at time that is at least 1 interval from the PREVIOUS next_due_at".
+// This prevents skipping days when a task is completed late in the evening.
+//
+// Example: generate-at = 02:00 AM, interval = 1 day, previous next_due = Feb 25 02:00 AM.
+// If the user completes the task at 11:30 PM on Feb 24, the next due should be
+// Feb 25 at 02:00 AM (not Feb 26), because the previous due date was Feb 25.
 func OnAutoTaskCompleted(s *xorm.Session, task *Task) error {
 	// Check if this task has an auto_template_id via SQL
 	var autoTemplateID int64
@@ -169,13 +177,58 @@ func OnAutoTaskCompleted(s *xorm.Session, task *Task) error {
 	now := time.Now()
 	tmpl.LastCompletedAt = &now
 
-	// Calculate next due from NOW (completion time), not from the original due date.
-	// This prevents task pile-up if the user was late completing.
-	nextDue := advanceFromTime(now, tmpl.IntervalValue, tmpl.IntervalUnit)
+	// Calculate next due anchored to the generate-at time, not from NOW.
+	nextDue := advanceNextDueAt(tmpl)
 	tmpl.NextDueAt = &nextDue
 
 	_, err = s.ID(tmpl.ID).Cols("last_completed_at", "next_due_at").Update(tmpl)
 	return err
+}
+
+// advanceNextDueAt calculates the next due date by finding the next occurrence
+// of the generate-at time (hour:minute from StartDate) that is at least 1
+// interval from the PREVIOUS next_due_at (or from now if no previous).
+//
+// This anchors scheduling to the configured time-of-day rather than to when
+// the user happened to complete the task, preventing day-skipping.
+func advanceNextDueAt(tmpl *AutoTaskTemplate) time.Time {
+	now := time.Now()
+
+	// Extract the generate-at hour/minute from the template's start_date
+	genHour := tmpl.StartDate.Hour()
+	genMin := tmpl.StartDate.Minute()
+	loc := tmpl.StartDate.Location()
+	if loc == nil {
+		loc = time.UTC
+	}
+
+	// Determine the anchor point: advance from the previous next_due_at if set,
+	// otherwise from now.
+	anchor := now
+	if tmpl.NextDueAt != nil && !tmpl.NextDueAt.IsZero() {
+		anchor = *tmpl.NextDueAt
+	}
+
+	// Add one interval to the anchor
+	candidate := advanceFromTime(anchor, tmpl.IntervalValue, tmpl.IntervalUnit)
+
+	// Snap to the generate-at time of day
+	candidate = time.Date(
+		candidate.Year(), candidate.Month(), candidate.Day(),
+		genHour, genMin, 0, 0, loc,
+	)
+
+	// If the candidate is still in the past (can happen if the task was very
+	// overdue), keep advancing until it's in the future.
+	for !candidate.After(now) {
+		candidate = advanceFromTime(candidate, tmpl.IntervalValue, tmpl.IntervalUnit)
+		candidate = time.Date(
+			candidate.Year(), candidate.Month(), candidate.Day(),
+			genHour, genMin, 0, 0, loc,
+		)
+	}
+
+	return candidate
 }
 
 // createAutoTaskInstance handles the actual task creation, label/assignee assignment,
@@ -242,7 +295,12 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 	// Update template tracking
 	nowTime := time.Now()
 	tmpl.LastCreatedAt = &nowTime
-	_, _ = s.ID(tmpl.ID).Cols("last_created_at").Update(tmpl)
+
+	// Advance next_due_at for the next cycle
+	nextDue := advanceNextDueAt(tmpl)
+	tmpl.NextDueAt = &nextDue
+
+	_, _ = s.ID(tmpl.ID).Cols("last_created_at", "next_due_at").Update(tmpl)
 
 	// Log the generation event
 	triggeredBy := int64(0)

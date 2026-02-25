@@ -123,7 +123,6 @@
 		<Modal
 			:enabled="showEditModal"
 			@close="closeModal"
-			variant="scrolling"
 		>
 			<Card
 				class="auto-task-modal"
@@ -322,7 +321,6 @@
 		<Modal
 			:enabled="showLogModal"
 			@close="showLogModal = false"
-			variant="scrolling"
 		>
 			<Card
 				class="log-modal-card"
@@ -951,21 +949,26 @@ defineExpose({openCreate})
 	gap: .35rem;
 }
 
-// Edit modal — match template/chain modal sizing
+// Edit modal — constrain width + internal scroll for default (centered) variant
 .auto-task-modal {
-	max-inline-size: 1024px;
-	inline-size: 100%;
-	margin-inline: auto;
+	text-align: start;
+	max-inline-size: 560px;
+	inline-size: 90vw;
+	max-block-size: 80vh;
+	overflow-y: auto;
 }
 
-// Log viewer modal — :deep() pierces Card component scope for centering
+// Log viewer modal — same centered approach
 :deep(.log-modal-card) {
+	text-align: start;
 	max-inline-size: 560px;
-	margin-inline: auto;
+	inline-size: 90vw;
+	max-block-size: 80vh;
+	overflow-y: auto;
 }
 
 .log-modal-content {
-	min-inline-size: 400px;
+	min-inline-size: 0;
 }
 
 .log-summary {
