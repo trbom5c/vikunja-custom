@@ -153,6 +153,10 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 // OnAutoTaskCompleted should be called when a task with auto_template_id is marked done.
 // It recalculates the next_due_at anchored to the generate-at time, not completion time.
 //
+// IMPORTANT: If the task was manually triggered (via "Send to project now"),
+// we update last_completed_at but do NOT advance next_due_at. Manual triggers
+// are "extra" tasks — they shouldn't shift the schedule forward.
+//
 // The key insight: next_due_at should always be "the next occurrence of the
 // generate-at time that is at least 1 interval from the PREVIOUS next_due_at".
 // This prevents skipping days when a task is completed late in the evening.
@@ -177,7 +181,24 @@ func OnAutoTaskCompleted(s *xorm.Session, task *Task) error {
 	now := time.Now()
 	tmpl.LastCompletedAt = &now
 
-	// Calculate next due anchored to the generate-at time, not from NOW.
+	// Check if this task was manually triggered — if so, don't advance the schedule.
+	// Manual triggers are "extra" tasks; the regular schedule should continue unchanged.
+	var triggerType string
+	wasManual, err := s.SQL(
+		"SELECT trigger_type FROM auto_task_log WHERE task_id = ? ORDER BY created DESC LIMIT 1",
+		task.ID,
+	).Get(&triggerType)
+	if err != nil {
+		return err
+	}
+
+	if wasManual && triggerType == "manual" {
+		// Manual task completed — only update last_completed_at, leave next_due_at alone
+		_, err = s.ID(tmpl.ID).Cols("last_completed_at").Update(tmpl)
+		return err
+	}
+
+	// System/cron task completed — advance the schedule
 	nextDue := advanceNextDueAt(tmpl)
 	tmpl.NextDueAt = &nextDue
 
@@ -296,11 +317,15 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 	nowTime := time.Now()
 	tmpl.LastCreatedAt = &nowTime
 
-	// Advance next_due_at for the next cycle
-	nextDue := advanceNextDueAt(tmpl)
-	tmpl.NextDueAt = &nextDue
-
-	_, _ = s.ID(tmpl.ID).Cols("last_created_at", "next_due_at").Update(tmpl)
+	// Only advance next_due_at for scheduled (system/cron) triggers.
+	// Manual triggers are "extra" tasks — don't shift the schedule.
+	if triggerType != "manual" {
+		nextDue := advanceNextDueAt(tmpl)
+		tmpl.NextDueAt = &nextDue
+		_, _ = s.ID(tmpl.ID).Cols("last_created_at", "next_due_at").Update(tmpl)
+	} else {
+		_, _ = s.ID(tmpl.ID).Cols("last_created_at").Update(tmpl)
+	}
 
 	// Log the generation event
 	triggeredBy := int64(0)
