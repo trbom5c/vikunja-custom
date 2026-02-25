@@ -16,6 +16,9 @@
 			:timeline-end="dateToDate"
 			:on-update="(id, start, end) => emit('updateTask', id, start, end)"
 		>
+			<!-- Full task name tooltip (at group level so it works over text too) -->
+			<title>{{ getBarTooltip(bar) }}</title>
+
 			<!-- Gradient definitions for partial-date bars -->
 			<defs v-if="bar.meta?.dateType === 'startOnly' || bar.meta?.dateType === 'endOnly'">
 				<linearGradient
@@ -83,11 +86,7 @@
 				:aria-label="getBarAriaLabel(bar)"
 				:aria-pressed="isRowFocused"
 				@pointerdown="handleBarPointerDown(bar, $event)"
-			>
-				<title v-if="bar.meta?.isOverdue">
-					{{ getOverdueTooltip(bar) }}
-				</title>
-			</rect>
+			/>
 
 			<!-- Overdue left-arrow indicator -->
 			<g v-if="bar.meta?.isOverdue">
@@ -399,6 +398,27 @@ function getOverdueTooltip(bar: GanttBarModel): string {
 	const origEnd = bar.meta?.originalEnd as Date | undefined
 	if (!origStart || !origEnd) return 'Overdue task'
 	return `Overdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
+}
+
+function getBarTooltip(bar: GanttBarModel): string {
+	const label = bar.meta?.label || bar.label || bar.id
+	const startDate = bar.meta?.isOverdue && bar.meta?.originalStart
+		? (bar.meta.originalStart as Date).toLocaleDateString()
+		: bar.start.toLocaleDateString()
+	const endDate = bar.meta?.isOverdue && bar.meta?.originalEnd
+		? (bar.meta.originalEnd as Date).toLocaleDateString()
+		: bar.end.toLocaleDateString()
+
+	let tip = `${label}\n${startDate} – ${endDate}`
+
+	if (bar.meta?.isOverdue) {
+		tip += `\n${getOverdueTooltip(bar)}`
+	}
+	if (bar.meta?.isDone) {
+		tip += '\n✓ Completed'
+	}
+
+	return tip
 }
 </script>
 

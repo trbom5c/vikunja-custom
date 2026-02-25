@@ -1,6 +1,6 @@
 <template>
 	<svg
-		v-if="arrows.length > 0"
+		v-if="cfg.enabled && arrows.length > 0"
 		class="gantt-dependency-arrows"
 		:width="totalWidth"
 		:height="totalHeight"

@@ -223,10 +223,9 @@ if (-not $Deploy) {
     Write-Host "  docker compose up -d" -ForegroundColor Gray
     Write-Host "  rm /tmp/vikunja-custom.tar" -ForegroundColor Gray
 } else {
-    Step "Export + upload + restart"
+    Step "Export + upload + load"
 
     $tarFile    = "$ROOT\vikunja-custom.tar"
-    $remotePath = "/tmp/vikunja-custom.tar"
     $configFile = "$PATCH\deploy-config.json"
 
     # -----------------------------------------------
@@ -237,12 +236,11 @@ if (-not $Deploy) {
         try {
             $deployConfig = Get-Content $configFile -Raw | ConvertFrom-Json
             Write-Host ""
-            Write-Host "  Saved deploy config found:" -ForegroundColor Cyan
-            Write-Host "    Host        : $($deployConfig.host)" -ForegroundColor Gray
-            Write-Host "    User        : $($deployConfig.user)" -ForegroundColor Gray
-            Write-Host "    SSH Port    : $($deployConfig.port)" -ForegroundColor Gray
-            Write-Host "    Auth        : $($deployConfig.authMethod)" -ForegroundColor Gray
-            Write-Host "    Compose Dir : $($deployConfig.composeDir)" -ForegroundColor Gray
+            Write-Host "  Saved deploy config:" -ForegroundColor Cyan
+            Write-Host "    Host       : $($deployConfig.host)" -ForegroundColor Gray
+            Write-Host "    User       : $($deployConfig.user)" -ForegroundColor Gray
+            Write-Host "    Port       : $($deployConfig.port)" -ForegroundColor Gray
+            Write-Host "    Remote Dir : $($deployConfig.remoteDir)" -ForegroundColor Gray
             Write-Host ""
             $reuse = Read-Host "  Use these settings? [Y/n]"
             if ($reuse -eq 'n' -or $reuse -eq 'N') {
@@ -255,7 +253,7 @@ if (-not $Deploy) {
 
     if (-not $deployConfig) {
         Write-Host ""
-        Write-Host "  ── Deploy Configuration ──" -ForegroundColor Yellow
+        Write-Host "  -- Deploy Configuration --" -ForegroundColor Yellow
         Write-Host ""
 
         $dHost = Read-Host "  Server hostname or IP"
@@ -267,93 +265,36 @@ if (-not $Deploy) {
         $dPort = Read-Host "  SSH port [22]"
         if (-not $dPort) { $dPort = "22" }
 
-        Write-Host ""
-        Write-Host "  Authentication method:" -ForegroundColor Cyan
-        Write-Host "    1) SSH key (default)" -ForegroundColor Gray
-        Write-Host "    2) SSH key with custom path" -ForegroundColor Gray
-        Write-Host "    3) Password" -ForegroundColor Gray
-        $authChoice = Read-Host "  Choice [1]"
-        if (-not $authChoice) { $authChoice = "1" }
-
-        $dAuthMethod = "key"
-        $dKeyPath = ""
-        switch ($authChoice) {
-            "2" {
-                $dAuthMethod = "key"
-                $dKeyPath = Read-Host "  Path to SSH private key"
-                if (-not (Test-Path $dKeyPath)) {
-                    Write-Host "  [!] Key file not found: $dKeyPath" -ForegroundColor Red
-                    exit 1
-                }
-            }
-            "3" { $dAuthMethod = "password" }
-            default { $dAuthMethod = "key" }
-        }
-
-        $dComposeDir = Read-Host "  Docker Compose directory on server [/opt/vikunja]"
-        if (-not $dComposeDir) { $dComposeDir = "/opt/vikunja" }
+        $dRemoteDir = Read-Host "  Remote folder to SCP tar into [/tmp]"
+        if (-not $dRemoteDir) { $dRemoteDir = "/tmp" }
 
         $deployConfig = [PSCustomObject]@{
-            host       = $dHost
-            user       = $dUser
-            port       = $dPort
-            authMethod = $dAuthMethod
-            keyPath    = $dKeyPath
-            composeDir = $dComposeDir
+            host      = $dHost
+            user      = $dUser
+            port      = $dPort
+            remoteDir = $dRemoteDir
         }
 
-        # Save for next time
-        $saveConfig = Read-Host "  Save these settings for next deploy? [Y/n]"
-        if ($saveConfig -ne 'n' -and $saveConfig -ne 'N') {
+        $saveIt = Read-Host "  Save for next time? [Y/n]"
+        if ($saveIt -ne 'n' -and $saveIt -ne 'N') {
             $deployConfig | ConvertTo-Json | Set-Content $configFile -Encoding UTF8
             Write-Host "  Saved to $configFile" -ForegroundColor Green
         }
     }
 
-    # -----------------------------------------------
-    #  Build SSH/SCP arguments
-    # -----------------------------------------------
-    $server = "$($deployConfig.user)@$($deployConfig.host)"
-    $composeDir = $deployConfig.composeDir
+    $server    = "$($deployConfig.user)@$($deployConfig.host)"
+    $remoteDir = $deployConfig.remoteDir
+    $remoteTar = "$remoteDir/vikunja-custom.tar"
+
     $sshArgs = @()
     $scpArgs = @()
-
-    # Port
     if ($deployConfig.port -and $deployConfig.port -ne "22") {
         $sshArgs += @("-p", $deployConfig.port)
         $scpArgs += @("-P", $deployConfig.port)
     }
 
-    # Key path
-    if ($deployConfig.authMethod -eq "key" -and $deployConfig.keyPath) {
-        $sshArgs += @("-i", $deployConfig.keyPath)
-        $scpArgs += @("-i", $deployConfig.keyPath)
-    }
-
-    # Password auth — use sshpass if available
-    $useSshpass = $false
-    if ($deployConfig.authMethod -eq "password") {
-        $sshPassword = Read-Host "  SSH password for $server" -AsSecureString
-        $plainPw = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sshPassword)
-        )
-
-        # Check for sshpass
-        $sshpassPath = Get-Command sshpass -ErrorAction SilentlyContinue
-        if ($sshpassPath) {
-            $useSshpass = $true
-        } else {
-            Write-Host ""
-            Write-Host "  [!] 'sshpass' not found. For password auth, install sshpass" -ForegroundColor Yellow
-            Write-Host "      or use SSH key auth instead." -ForegroundColor Yellow
-            Write-Host "      Falling back to interactive SSH (you may be prompted)." -ForegroundColor Yellow
-            Write-Host ""
-        }
-    }
-
-    # -----------------------------------------------
-    #  Save image
-    # -----------------------------------------------
+    # --- Save image ---
+    Write-Host ""
     Write-Host "  Saving image..." -ForegroundColor Gray
     docker save vikunja-custom:latest -o $tarFile
 
@@ -365,45 +306,27 @@ if (-not $Deploy) {
     $sizeMB = [math]::Round((Get-Item $tarFile).Length / 1MB, 1)
     Write-Host "  Image: $sizeMB MB" -ForegroundColor Gray
 
-    # -----------------------------------------------
-    #  Upload
-    # -----------------------------------------------
-    Write-Host "  Uploading to $server..." -ForegroundColor Gray
-
-    if ($useSshpass) {
-        & sshpass -p $plainPw scp @scpArgs $tarFile "${server}:${remotePath}"
-    } else {
-        scp @scpArgs $tarFile "${server}:${remotePath}"
-    }
+    # --- Upload ---
+    Write-Host "  Uploading to ${server}:${remoteDir}..." -ForegroundColor Gray
+    scp @scpArgs $tarFile "${server}:${remoteTar}"
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host ""
-        Write-Host "  [!] SCP upload failed" -ForegroundColor Red
+        Write-Host "  [!] SCP failed" -ForegroundColor Red
         Remove-Item $tarFile -Force -ErrorAction SilentlyContinue
         exit 1
     }
 
-    # -----------------------------------------------
-    #  Remote: load + restart
-    # -----------------------------------------------
-    Write-Host "  Loading image + restarting..." -ForegroundColor Gray
-    $sshCmd = "docker load -i $remotePath; cd $composeDir; docker compose down; docker compose up -d; rm $remotePath"
-
-    if ($useSshpass) {
-        & sshpass -p $plainPw ssh @sshArgs $server $sshCmd
-    } else {
-        ssh @sshArgs $server $sshCmd
-    }
-
-    # Clear password from memory
-    if ($plainPw) { $plainPw = $null }
+    # --- Load image on server ---
+    Write-Host "  Loading image on server..." -ForegroundColor Gray
+    ssh @sshArgs $server "docker load -i $remoteTar && rm $remoteTar"
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
-        Write-Host "  DEPLOYED successfully to $($deployConfig.host)" -ForegroundColor Green
+        Write-Host "  Image loaded on $($deployConfig.host)" -ForegroundColor Green
+        Write-Host "  Now redeploy the stack in Portainer." -ForegroundColor Yellow
     } else {
         Write-Host ""
-        Write-Host "  [!] Remote restart failed - check server" -ForegroundColor Red
+        Write-Host "  [!] docker load failed - check server" -ForegroundColor Red
     }
 
     Remove-Item $tarFile -Force -ErrorAction SilentlyContinue

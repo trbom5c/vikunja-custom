@@ -18,20 +18,6 @@
 							:placeholder="$t('project.gantt.range')"
 						/>
 					</FormField>
-					<div
-						v-if="!hasDefaultFilters"
-						class="field"
-					>
-						<label
-							class="label"
-							for="range"
-						>Reset</label>
-						<div class="control">
-							<XButton @click="setDefaultFilters">
-								Reset
-							</XButton>
-						</div>
-					</div>
 					<FancyCheckbox
 						v-model="filters.showTasksWithoutDates"
 						is-block
@@ -42,7 +28,7 @@
 						v-model="filters.showDoneTasks"
 						is-block
 					>
-						Show completed tasks
+						{{ $t('task.show.completed') }}
 					</FancyCheckbox>
 					<SubprojectFilter
 						:project-id="filters.projectId"
@@ -191,8 +177,6 @@ function onTaskCreatedFromTemplate(createdTask: ITask) {
 
 const {
 	filters,
-	hasDefaultFilters,
-	setDefaultFilters,
 	tasks,
 	isLoading,
 	addTask,

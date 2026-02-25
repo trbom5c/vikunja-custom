@@ -3,6 +3,7 @@ import {reactive, watch} from 'vue'
 const STORAGE_KEY = 'gantt-arrow-config'
 
 export interface GanttArrowConfig {
+	enabled: boolean
 	strokeWidth: number
 	dashArray: string
 	opacity: number
@@ -31,6 +32,7 @@ export interface GanttArrowConfig {
 }
 
 const DEFAULTS: GanttArrowConfig = {
+	enabled: true,
 	strokeWidth: 1.5,
 	dashArray: '2,2',
 	opacity: 0.5,
