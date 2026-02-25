@@ -51,6 +51,7 @@
 						@update:excludeProjectIds="onExcludeChange"
 						@update:colorMap="onColorMapChange"
 					/>
+					<GanttArrowSettings />
 				</div>
 			</Card>
 
@@ -129,6 +130,7 @@ import FormField from '@/components/input/FormField.vue'
 
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
+import GanttArrowSettings from '@/components/gantt/GanttArrowSettings.vue'
 import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
 import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import {useGanttFilters} from '../../../views/project/helpers/useGanttFilters'
