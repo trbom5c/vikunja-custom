@@ -248,6 +248,12 @@
 									<td v-if="activeColumns.title">
 										<TaskGlanceTooltip :task="t">
 											<RouterLink :to="taskDetailRoutes[t.id]">
+												<Icon
+													v-if="t.autoTemplateId > 0"
+													icon="bolt"
+													v-tooltip="$t('task.autoTask.autoGenIndicator')"
+													class="auto-gen-indicator"
+												/>
 												{{ t.title }}
 											</RouterLink>
 										</TaskGlanceTooltip>
@@ -537,5 +543,11 @@ const taskDetailRoutes = computed(() => Object.fromEntries(
 
 .filter-container :deep(.popup) {
 	inset-block-start: 7rem;
+}
+
+.auto-gen-indicator {
+	color: var(--warning);
+	font-size: .75rem;
+	margin-inline-end: .25rem;
 }
 </style>

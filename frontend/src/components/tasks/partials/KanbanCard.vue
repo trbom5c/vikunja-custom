@@ -76,7 +76,15 @@
 				</div>
 			</div>
 			
-			<h3>{{ task.title }}</h3>
+			<h3>
+				<Icon
+					v-if="task.autoTemplateId > 0"
+					icon="bolt"
+					v-tooltip="$t('task.autoTask.autoGenIndicator')"
+					class="auto-gen-indicator"
+				/>
+				{{ task.title }}
+			</h3>
 			
 			<span
 				v-if="projectTitle"
@@ -448,5 +456,11 @@ $task-background: var(--white);
 	background: var(--grey-100);
 	border-radius: $radius;
 	padding: 0.25rem;
+}
+
+.auto-gen-indicator {
+	color: var(--warning);
+	font-size: .75rem;
+	margin-inline-end: .25rem;
 }
 </style>

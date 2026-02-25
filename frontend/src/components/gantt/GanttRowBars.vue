@@ -165,7 +165,7 @@
 				:clip-path="`url(#clip-${bar.id})`"
 				aria-hidden="true"
 			>
-				{{ bar.meta?.label || bar.id }}
+				<tspan v-if="bar.meta?.isAutoGen" fill="#e67e22">⚡</tspan>{{ bar.meta?.label || bar.id }}
 			</text>
 		</GanttBarPrimitive>
 	</svg>
