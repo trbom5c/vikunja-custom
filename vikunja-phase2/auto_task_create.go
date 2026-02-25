@@ -30,10 +30,13 @@ import (
 
 // CheckAndCreateAutoTasks scans all active auto-task templates for a user
 // and creates task instances for any that are due.
-// Rules:
-//   - Only one open (not done) instance per template can exist at a time
-//   - If the previous instance isn't done, no new one is created (it just goes overdue)
-//   - next_due_at is recalculated anchored to the generate-at time, not completion time
+//
+// Simplified scheduling logic:
+//  1. Is next_due_at <= now? (template is due)
+//  2. Does an open (not done) task already exist? If yes → skip.
+//  3. Generate the task + advance next_due_at to the next generate-at time.
+//
+// Manual triggers ("Send to project now") never touch next_due_at.
 func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 	now := time.Now()
 
@@ -54,8 +57,7 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 			continue
 		}
 
-		// Check: does an open (not done) task already exist for this template?
-		// If so, skip — the user needs to complete it first.
+		// Does an open (not done) task already exist for this template?
 		openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
 		if err != nil {
 			return nil, err
@@ -64,56 +66,7 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 			continue
 		}
 
-		// No open task exists. Before creating a new one, check if a task was
-		// recently completed that we haven't processed yet (OnAutoTaskCompleted
-		// isn't hooked into the task update path). Find the most recently
-		// completed task for this template and advance next_due_at from its
-		// completion time.
-		type doneInfo struct {
-			ID     int64     `xorm:"'id'"`
-			DoneAt time.Time `xorm:"'done_at'"`
-		}
-		lastDone := &doneInfo{}
-		hasDone, err := s.SQL(
-			"SELECT id, done_at FROM tasks WHERE auto_template_id = ? AND done = ? AND done_at IS NOT NULL ORDER BY done_at DESC LIMIT 1",
-			tmpl.ID, true,
-		).Get(lastDone)
-		if err != nil {
-			return nil, err
-		}
-
-		if hasDone && !lastDone.DoneAt.IsZero() {
-			// Compare: was this task completed AFTER the template's last_completed_at?
-			// If so, we need to advance next_due_at first.
-			needsAdvance := false
-			if tmpl.LastCompletedAt == nil {
-				needsAdvance = true
-			} else if lastDone.DoneAt.After(*tmpl.LastCompletedAt) {
-				needsAdvance = true
-			}
-
-			if needsAdvance {
-				completedAt := lastDone.DoneAt
-				tmpl.LastCompletedAt = &completedAt
-				nextDue := advanceNextDueAt(tmpl)
-				tmpl.NextDueAt = &nextDue
-				_, _ = s.ID(tmpl.ID).Cols("last_completed_at", "next_due_at").Update(tmpl)
-
-				// Log the completion event
-				_, _ = s.Insert(&AutoTaskLog{
-					TemplateID:  tmpl.ID,
-					TaskID:      lastDone.ID,
-					TriggerType: "completed",
-				})
-
-				// After advancing, check if the NEW next_due_at is still in the past.
-				// If not, this template isn't due yet — skip it.
-				if nextDue.After(now) {
-					continue
-				}
-			}
-		}
-
+		// All clear — generate the task
 		task, err := createAutoTaskInstance(s, tmpl, u, "system")
 		if err != nil {
 			return nil, err
@@ -128,6 +81,7 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 
 // TriggerAutoTask manually creates a task from an auto-task template immediately,
 // regardless of its schedule. Respects the "one open instance" rule.
+// Does NOT advance next_due_at — manual triggers are "extra" tasks.
 func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, error) {
 	tmpl := &AutoTaskTemplate{}
 	has, err := s.Where("id = ? AND owner_id = ?", templateID, u.ID).Get(tmpl)
@@ -151,23 +105,18 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 }
 
 // OnAutoTaskCompleted should be called when a task with auto_template_id is marked done.
-// It recalculates the next_due_at anchored to the generate-at time, not completion time.
 //
-// IMPORTANT: If the task was manually triggered (via "Send to project now"),
-// we update last_completed_at but do NOT advance next_due_at. Manual triggers
-// are "extra" tasks — they shouldn't shift the schedule forward.
+// For SCHEDULED tasks: updates last_completed_at. Schedule already advanced at
+// creation time, so nothing else to do.
 //
-// The key insight: next_due_at should always be "the next occurrence of the
-// generate-at time that is at least 1 interval from the PREVIOUS next_due_at".
-// This prevents skipping days when a task is completed late in the evening.
-//
-// Example: generate-at = 02:00 AM, interval = 1 day, previous next_due = Feb 25 02:00 AM.
-// If the user completes the task at 11:30 PM on Feb 24, the next due should be
-// Feb 25 at 02:00 AM (not Feb 26), because the previous due date was Feb 25.
+// For MANUAL tasks: only updates last_completed_at. The schedule stays put.
 func OnAutoTaskCompleted(s *xorm.Session, task *Task) error {
-	// Check if this task has an auto_template_id via SQL
+	// Check if this task has an auto_template_id
 	var autoTemplateID int64
-	has, err := s.SQL("SELECT auto_template_id FROM tasks WHERE id = ? AND auto_template_id IS NOT NULL AND auto_template_id > 0", task.ID).Get(&autoTemplateID)
+	has, err := s.SQL(
+		"SELECT auto_template_id FROM tasks WHERE id = ? AND auto_template_id IS NOT NULL AND auto_template_id > 0",
+		task.ID,
+	).Get(&autoTemplateID)
 	if err != nil || !has || autoTemplateID == 0 {
 		return err
 	}
@@ -181,41 +130,46 @@ func OnAutoTaskCompleted(s *xorm.Session, task *Task) error {
 	now := time.Now()
 	tmpl.LastCompletedAt = &now
 
-	// Check if this task was manually triggered — if so, don't advance the schedule.
-	// Manual triggers are "extra" tasks; the regular schedule should continue unchanged.
-	var triggerType string
-	wasManual, err := s.SQL(
-		"SELECT trigger_type FROM auto_task_log WHERE task_id = ? ORDER BY created DESC LIMIT 1",
-		task.ID,
-	).Get(&triggerType)
-	if err != nil {
-		return err
-	}
-
-	if wasManual && triggerType == "manual" {
-		// Manual task completed — only update last_completed_at, leave next_due_at alone
-		_, err = s.ID(tmpl.ID).Cols("last_completed_at").Update(tmpl)
-		return err
-	}
-
-	// System/cron task completed — advance the schedule
-	nextDue := advanceNextDueAt(tmpl)
-	tmpl.NextDueAt = &nextDue
-
-	_, err = s.ID(tmpl.ID).Cols("last_completed_at", "next_due_at").Update(tmpl)
+	// Just update last_completed_at. The schedule (next_due_at) was already
+	// advanced when the task was created (for system triggers), or left alone
+	// (for manual triggers). No need to touch it again here.
+	_, err = s.ID(tmpl.ID).Cols("last_completed_at").Update(tmpl)
 	return err
 }
 
-// advanceNextDueAt calculates the next due date by finding the next occurrence
-// of the generate-at time (hour:minute from StartDate) that is at least 1
-// interval from the PREVIOUS next_due_at (or from now if no previous).
-//
-// This anchors scheduling to the configured time-of-day rather than to when
-// the user happened to complete the task, preventing day-skipping.
-func advanceNextDueAt(tmpl *AutoTaskTemplate) time.Time {
+// ResetAutoTaskSchedule resets next_due_at to the next upcoming generate-at time.
+// This is the "panic button" for when the schedule has drifted or run away.
+func ResetAutoTaskSchedule(s *xorm.Session, templateID int64, ownerID int64) (*time.Time, error) {
+	tmpl := &AutoTaskTemplate{}
+	has, err := s.Where("id = ? AND owner_id = ?", templateID, ownerID).Get(tmpl)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, ErrAutoTaskTemplateNotFound{ID: templateID}
+	}
+
+	// Force-calculate the next generate-at time from NOW, ignoring all history
+	nextDue := nextGenerateAtFromNow(tmpl)
+	tmpl.NextDueAt = &nextDue
+
+	_, err = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Infof("[Auto-Task] Schedule reset for template %d (%s) — next_due_at set to %s",
+		tmpl.ID, tmpl.Title, nextDue.Format(time.RFC3339))
+
+	return &nextDue, nil
+}
+
+// nextGenerateAt finds the next occurrence of the generate-at time that is in
+// the future AND at least 1 interval from the current next_due_at.
+// Used after creating a scheduled task to advance the schedule.
+func nextGenerateAt(tmpl *AutoTaskTemplate) time.Time {
 	now := time.Now()
 
-	// Extract the generate-at hour/minute from the template's start_date
 	genHour := tmpl.StartDate.Hour()
 	genMin := tmpl.StartDate.Minute()
 	loc := tmpl.StartDate.Location()
@@ -223,30 +177,54 @@ func advanceNextDueAt(tmpl *AutoTaskTemplate) time.Time {
 		loc = time.UTC
 	}
 
-	// Determine the anchor point: advance from the previous next_due_at if set,
-	// otherwise from now.
+	// Anchor from the current next_due_at (the slot we just consumed)
 	anchor := now
 	if tmpl.NextDueAt != nil && !tmpl.NextDueAt.IsZero() {
 		anchor = *tmpl.NextDueAt
 	}
 
-	// Add one interval to the anchor
+	// Add one interval from the anchor
 	candidate := advanceFromTime(anchor, tmpl.IntervalValue, tmpl.IntervalUnit)
 
-	// Snap to the generate-at time of day
+	// Snap to generate-at time of day
 	candidate = time.Date(
 		candidate.Year(), candidate.Month(), candidate.Day(),
 		genHour, genMin, 0, 0, loc,
 	)
 
-	// If the candidate is still in the past (can happen if the task was very
-	// overdue), keep advancing until it's in the future.
+	// Safety: if still in the past, keep advancing
 	for !candidate.After(now) {
 		candidate = advanceFromTime(candidate, tmpl.IntervalValue, tmpl.IntervalUnit)
 		candidate = time.Date(
 			candidate.Year(), candidate.Month(), candidate.Day(),
 			genHour, genMin, 0, 0, loc,
 		)
+	}
+
+	return candidate
+}
+
+// nextGenerateAtFromNow calculates the next generate-at time purely from NOW,
+// ignoring all scheduling history. Used by the reset function.
+func nextGenerateAtFromNow(tmpl *AutoTaskTemplate) time.Time {
+	now := time.Now()
+
+	genHour := tmpl.StartDate.Hour()
+	genMin := tmpl.StartDate.Minute()
+	loc := tmpl.StartDate.Location()
+	if loc == nil {
+		loc = time.UTC
+	}
+
+	// Today at the generate-at time
+	candidate := time.Date(
+		now.Year(), now.Month(), now.Day(),
+		genHour, genMin, 0, 0, loc,
+	)
+
+	// If that's already passed today, go to tomorrow
+	if !candidate.After(now) {
+		candidate = candidate.AddDate(0, 0, 1)
 	}
 
 	return candidate
@@ -260,7 +238,6 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 	if projectID == 0 {
 		projectID = u.DefaultProjectID
 		if projectID == 0 {
-			// Fallback: find first non-archived project
 			inbox := &Project{}
 			has, err := s.Where("owner_id = ? AND is_archived = ?", u.ID, false).
 				OrderBy("id ASC").Limit(1).Get(inbox)
@@ -295,7 +272,7 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 		return nil, fmt.Errorf("auto-task create failed for template %d: %w", tmpl.ID, err)
 	}
 
-	// Ensure auto_template_id is persisted (createTask may not include it in default cols)
+	// Ensure auto_template_id is persisted
 	_, _ = s.Exec("UPDATE tasks SET auto_template_id = ? WHERE id = ?", tmpl.ID, task.ID)
 
 	// Add labels
@@ -310,17 +287,17 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 		_, _ = s.Insert(ta)
 	}
 
-	// Copy attachments from template to the new task
+	// Copy attachments from template
 	copyAutoTaskTemplateAttachments(s, tmpl.ID, task.ID, u)
 
 	// Update template tracking
 	nowTime := time.Now()
 	tmpl.LastCreatedAt = &nowTime
 
-	// Only advance next_due_at for scheduled (system/cron) triggers.
-	// Manual triggers are "extra" tasks — don't shift the schedule.
+	// Only advance next_due_at for scheduled triggers.
+	// Manual triggers don't touch the schedule.
 	if triggerType != "manual" {
-		nextDue := advanceNextDueAt(tmpl)
+		nextDue := nextGenerateAt(tmpl)
 		tmpl.NextDueAt = &nextDue
 		_, _ = s.ID(tmpl.ID).Cols("last_created_at", "next_due_at").Update(tmpl)
 	} else {
@@ -370,8 +347,7 @@ func CheckAutoTasksFromAuth(s *xorm.Session, auth web.Auth) ([]*Task, error) {
 }
 
 // copyAutoTaskTemplateAttachments copies all file attachments from an auto-task
-// template to a newly generated task. Each file is duplicated in storage so that
-// the template and task attachments are independent.
+// template to a newly generated task.
 func copyAutoTaskTemplateAttachments(s *xorm.Session, templateID, taskID int64, u *user.User) {
 	templateAttachments := make([]*AutoTaskTemplateAttachment, 0)
 	err := s.Where("template_id = ?", templateID).Find(&templateAttachments)
@@ -385,20 +361,17 @@ func copyAutoTaskTemplateAttachments(s *xorm.Session, templateID, taskID int64, 
 	}
 
 	for _, tmplAttach := range templateAttachments {
-		// Load the source file metadata
 		srcFile := &files.File{ID: tmplAttach.FileID}
 		if err := srcFile.LoadFileMetaByID(); err != nil {
 			log.Debugf("[Auto-Task] Skipping attachment %d: file %d metadata not found: %s", tmplAttach.ID, tmplAttach.FileID, err)
 			continue
 		}
 
-		// Load the actual file content
 		if err := srcFile.LoadFileByID(); err != nil {
 			log.Debugf("[Auto-Task] Skipping attachment %d: could not load file %d: %s", tmplAttach.ID, tmplAttach.FileID, err)
 			continue
 		}
 
-		// Create a new task attachment by duplicating the file
 		newAttachment := &TaskAttachment{
 			TaskID: taskID,
 		}

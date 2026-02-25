@@ -357,8 +357,41 @@
 							class="log-summary-row"
 						>
 							<span class="log-summary-label">{{ $t('task.autoTask.nextDue') }}:</span>
-							<span :class="{'has-text-danger': isOverdue(logTemplate.next_due_at)}">
-								{{ formatDate(logTemplate.next_due_at) }}
+							<span class="log-next-value">
+								<span
+									:class="{'has-text-danger': isOverdue(logTemplate.next_due_at)}"
+									@dblclick="resetSchedule(logTemplate)"
+									v-tooltip="$t('task.autoTask.resetHint')"
+								>
+									{{ formatDate(logTemplate.next_due_at) }}
+								</span>
+								<BaseButton
+									v-if="!showResetConfirm"
+									class="reset-schedule-btn"
+									v-tooltip="$t('task.autoTask.resetSchedule')"
+									@click="showResetConfirm = true"
+								>
+									<Icon icon="redo" />
+								</BaseButton>
+								<span
+									v-if="showResetConfirm"
+									class="reset-confirm"
+								>
+									<span class="reset-confirm-text">{{ $t('task.autoTask.resetConfirm') }}</span>
+									<BaseButton
+										class="reset-confirm-btn is-yes"
+										:class="{'is-loading': resetting}"
+										@click="resetSchedule(logTemplate)"
+									>
+										<Icon icon="check" />
+									</BaseButton>
+									<BaseButton
+										class="reset-confirm-btn is-no"
+										@click="showResetConfirm = false"
+									>
+										<Icon icon="times" />
+									</BaseButton>
+								</span>
 							</span>
 						</div>
 						<div class="log-summary-row">
@@ -517,6 +550,7 @@ import {
 	deleteAutoTask as deleteAutoTaskApi,
 	triggerAutoTask,
 	truncateAutoTaskLog,
+	resetAutoTaskSchedule,
 	emptyAutoTaskTemplate,
 } from '@/services/autoTaskApi'
 import type {IAutoTaskTemplate} from '@/services/autoTaskApi'
@@ -651,6 +685,8 @@ function openLogModal(tmpl: IAutoTaskTemplate) {
 }
 
 const truncating = ref(false)
+const resetting = ref(false)
+const showResetConfirm = ref(false)
 const showClearConfirm = ref(false)
 
 function confirmClearLog() {
@@ -677,6 +713,26 @@ async function truncateLog(keep: number) {
 		error({message: e?.message || t('task.autoTask.logTruncateError')})
 	} finally {
 		truncating.value = false
+	}
+}
+
+async function resetSchedule(tmpl: IAutoTaskTemplate) {
+	if (!tmpl?.id) return
+	resetting.value = true
+	showResetConfirm.value = false
+	try {
+		const result = await resetAutoTaskSchedule(tmpl.id)
+		await loadTemplates()
+		// Refresh the log modal reference
+		const refreshed = templates.value.find((t: IAutoTaskTemplate) => t.id === tmpl.id)
+		if (refreshed) {
+			logTemplate.value = refreshed
+		}
+		success({message: t('task.autoTask.resetSuccess')})
+	} catch (e: any) {
+		error({message: e?.message || t('task.autoTask.resetError')})
+	} finally {
+		resetting.value = false
 	}
 }
 
@@ -987,6 +1043,64 @@ defineExpose({openCreate})
 	color: var(--grey-500);
 	min-inline-size: 120px;
 	font-weight: 500;
+}
+
+.log-next-value {
+	display: inline-flex;
+	align-items: center;
+	gap: .4rem;
+}
+
+.reset-schedule-btn {
+	padding: .1rem .3rem;
+	border-radius: $radius;
+	color: var(--grey-400);
+	font-size: .7rem;
+	transition: color $transition, background $transition;
+	opacity: 0.5;
+
+	&:hover {
+		color: var(--primary);
+		background: var(--grey-100);
+		opacity: 1;
+	}
+}
+
+.reset-confirm {
+	display: inline-flex;
+	align-items: center;
+	gap: .25rem;
+	font-size: .75rem;
+	margin-inline-start: .25rem;
+}
+
+.reset-confirm-text {
+	color: var(--warning);
+	font-weight: 500;
+}
+
+.reset-confirm-btn {
+	padding: .15rem .35rem;
+	border-radius: $radius;
+	font-size: .7rem;
+
+	&.is-yes {
+		color: var(--success);
+
+		&:hover {
+			background: var(--success);
+			color: var(--white);
+		}
+	}
+
+	&.is-no {
+		color: var(--danger);
+
+		&:hover {
+			background: var(--danger);
+			color: var(--white);
+		}
+	}
 }
 
 .log-divider {
