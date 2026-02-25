@@ -951,31 +951,38 @@ defineExpose({openCreate})
 	gap: .35rem;
 }
 
-// Log viewer modal
-.log-modal-card {
+// Edit modal — match template/chain modal sizing
+.auto-task-modal {
+	max-inline-size: 1024px;
+	inline-size: 100%;
+	margin-inline: auto;
+}
+
+// Log viewer modal — :deep() pierces Card component scope for centering
+:deep(.log-modal-card) {
 	max-inline-size: 560px;
 	margin-inline: auto;
 }
 
 .log-modal-content {
-	min-inline-size: 0;
+	min-inline-size: 400px;
 }
 
 .log-summary {
 	display: flex;
 	flex-direction: column;
-	gap: .35rem;
+	gap: .5rem;
 }
 
 .log-summary-row {
 	display: flex;
-	gap: .5rem;
-	font-size: .8rem;
+	gap: .75rem;
+	font-size: .9rem;
 }
 
 .log-summary-label {
 	color: var(--grey-500);
-	min-inline-size: 110px;
+	min-inline-size: 120px;
 	font-weight: 500;
 }
 
@@ -993,23 +1000,23 @@ defineExpose({openCreate})
 .log-entry-modal {
 	display: flex;
 	align-items: center;
-	gap: .5rem;
-	padding: .4rem .6rem;
+	gap: .75rem;
+	padding: .5rem .75rem;
 	border-radius: $radius;
 	background: var(--grey-100);
-	font-size: .8rem;
+	font-size: .85rem;
 }
 
 .log-entry-icon {
 	flex-shrink: 0;
-	inline-size: 24px;
-	block-size: 24px;
+	inline-size: 28px;
+	block-size: 28px;
 	border-radius: 50%;
 	background: var(--grey-200);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: .65rem;
+	font-size: .7rem;
 	color: var(--grey-500);
 
 	&.is-completed {
