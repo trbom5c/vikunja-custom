@@ -325,6 +325,7 @@
 			variant="scrolling"
 		>
 			<Card
+				class="log-modal-card"
 				:title="$t('task.autoTask.generationLog') + (logTemplate ? ': ' + logTemplate.title : '')"
 				:has-close="true"
 				@close="showLogModal = false"
@@ -951,25 +952,30 @@ defineExpose({openCreate})
 }
 
 // Log viewer modal
+.log-modal-card {
+	max-inline-size: 560px;
+	margin-inline: auto;
+}
+
 .log-modal-content {
-	min-inline-size: 400px;
+	min-inline-size: 0;
 }
 
 .log-summary {
 	display: flex;
 	flex-direction: column;
-	gap: .5rem;
+	gap: .35rem;
 }
 
 .log-summary-row {
 	display: flex;
-	gap: .75rem;
-	font-size: .9rem;
+	gap: .5rem;
+	font-size: .8rem;
 }
 
 .log-summary-label {
 	color: var(--grey-500);
-	min-inline-size: 120px;
+	min-inline-size: 110px;
 	font-weight: 500;
 }
 
@@ -987,23 +993,23 @@ defineExpose({openCreate})
 .log-entry-modal {
 	display: flex;
 	align-items: center;
-	gap: .75rem;
-	padding: .5rem .75rem;
+	gap: .5rem;
+	padding: .4rem .6rem;
 	border-radius: $radius;
 	background: var(--grey-100);
-	font-size: .85rem;
+	font-size: .8rem;
 }
 
 .log-entry-icon {
 	flex-shrink: 0;
-	inline-size: 28px;
-	block-size: 28px;
+	inline-size: 24px;
+	block-size: 24px;
 	border-radius: 50%;
 	background: var(--grey-200);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: .7rem;
+	font-size: .65rem;
 	color: var(--grey-500);
 
 	&.is-completed {
