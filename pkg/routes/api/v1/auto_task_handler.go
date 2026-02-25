@@ -160,3 +160,49 @@ func TruncateAutoTaskLog(c *echo.Context) error {
 		"deleted": deleted,
 	})
 }
+
+// ResetAutoTaskSchedule resets the next_due_at to the next upcoming generate-at time.
+// @Summary Reset auto-task schedule
+// @tags autotask
+// @Accept json
+// @Produce json
+// @Security JWTKeyAuth
+// @Param id path int true "Auto-task template ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /autotasks/{id}/reset [post]
+func ResetAutoTaskSchedule(c *echo.Context) error {
+	templateID, err := strconv.ParseInt(c.Param("autotask"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid template ID")
+	}
+
+	auth, err := auth2.GetAuthFromClaims(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	s := db.NewSession()
+	defer s.Close()
+
+	if err := s.Begin(); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Could not start transaction")
+	}
+
+	nextDue, err := models.ResetAutoTaskSchedule(s, templateID, auth.GetID())
+	if err != nil {
+		_ = s.Rollback()
+		if _, ok := err.(models.ErrAutoTaskTemplateNotFound); ok {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	if err := s.Commit(); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Could not commit")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"next_due_at": nextDue,
+		"message":     "Schedule reset successfully",
+	})
+}

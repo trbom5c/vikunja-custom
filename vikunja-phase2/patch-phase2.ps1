@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 $ROOT = $PSScriptRoot | Split-Path -Parent
 $PATCH = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$stepTotal = 22
-if ($Deploy) { $stepTotal = 23 }
+$stepTotal = 23
+if ($Deploy) { $stepTotal = 24 }
 $step = 0
 
 function Step($msg) {
@@ -167,6 +167,10 @@ Copy-Item "$PATCH\Home.vue" "$ROOT\frontend\src\views\Home.vue" -Force
 Step "Task row: title left, project right, auto-gen indicator"
 Copy-Item "$PATCH\SingleTaskInProject.vue" "$ROOT\frontend\src\components\tasks\partials\SingleTaskInProject.vue" -Force
 
+Step "Auto-gen bolt indicator: table + kanban views"
+Copy-Item "$PATCH\ProjectTable.vue" "$ROOT\frontend\src\components\project\views\ProjectTable.vue" -Force
+Copy-Item "$PATCH\KanbanCard.vue"   "$ROOT\frontend\src\components\tasks\partials\KanbanCard.vue" -Force
+
 # ===========================
 #  FRONTEND - TODO Fixes (models + types)
 # ===========================
@@ -209,7 +213,7 @@ Write-Host "  Frontend models      : 2 files (task.ts, ITask.ts - autoTemplateId
 Write-Host "  i18n + misc          : 3 files (en.json+arrow keys, SubprojectFilter, PoweredByLink)" -ForegroundColor Gray
 Write-Host "  Documentation        : 3 files" -ForegroundColor Gray
 Write-Host "  --------------------------------" -ForegroundColor DarkGray
-Write-Host "  TOTAL                : 49 files" -ForegroundColor White
+Write-Host "  TOTAL                : 51 files" -ForegroundColor White
 Write-Host ""
 Write-Host "  TODO completions in this build:" -ForegroundColor Magenta
 Write-Host "    [x] Backend cron goroutine (auto_task_cron.go + init.go)" -ForegroundColor DarkCyan
