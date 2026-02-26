@@ -455,6 +455,12 @@ function getOverdueTooltip(bar: GanttBarModel): string {
 	opacity: 0;
 	transition: opacity 0.2s ease;
 	pointer-events: all; // Ensure they receive pointer events
+
+	// Hide resize handles on touch devices — too easy to trigger accidentally
+	@media (pointer: coarse) {
+		display: none;
+		pointer-events: none;
+	}
 }
 
 // Show resize handles on bar hover

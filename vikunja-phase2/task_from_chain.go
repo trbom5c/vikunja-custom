@@ -143,7 +143,7 @@ func (tfc *TaskFromChain) Create(s *xorm.Session, doer web.Auth) (err error) {
 			p := tfc.TitlePrefix
 			lastChar := p[len(p)-1]
 			if lastChar != ' ' && lastChar != '_' && lastChar != '-' && lastChar != ':' && lastChar != '/' && lastChar != '.' {
-				p = p + "_"
+				p = p + "-"
 			}
 			title = p + title
 		}

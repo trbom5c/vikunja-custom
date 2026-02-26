@@ -280,25 +280,54 @@ const availableProjects = computed(() => {
 })
 
 /**
- * Generate a prefix from the project name + current timestamp.
- * Format: ProjectName_YYMMDD-HHmm
+ * Generate a unique 5-char alphanumeric prefix.
+ * Checks against active (not done) tasks in the target project to avoid collisions.
  */
-function generatePrefix(projId?: number): string {
-	const pid = projId ?? targetProjectId.value
-	const project = projectStore.projects[pid]
-	const name = project?.title || `P${pid}`
-	const now = new Date()
-	const yy = String(now.getFullYear()).slice(-2)
-	const mm = String(now.getMonth() + 1).padStart(2, '0')
-	const dd = String(now.getDate()).padStart(2, '0')
-	const hh = String(now.getHours()).padStart(2, '0')
-	const min = String(now.getMinutes()).padStart(2, '0')
-	return `${name}_${yy}${mm}${dd}-${hh}${min}`
+async function generatePrefix(): Promise<string> {
+	const chars = '0123456789abcdefghijklmnopqrstuvwxyz'
+	const maxAttempts = 10
+
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		let code = ''
+		for (let i = 0; i < 5; i++) {
+			code += chars[Math.floor(Math.random() * chars.length)]
+		}
+
+		// Check if any active task in the target project starts with this prefix
+		try {
+			const http = AuthenticatedHTTPFactory()
+			const {data} = await http.get('/tasks', {
+				params: {
+					s: code,
+					filter: `done = false && project_id = ${targetProjectId.value}`,
+					per_page: 1,
+				},
+			})
+			// If no active tasks match this prefix, it's safe to use
+			const tasks = Array.isArray(data) ? data : []
+			const collision = tasks.some((task: any) =>
+				task.title?.toLowerCase().startsWith(code + '-') ||
+				task.title?.toLowerCase().startsWith(code + '_') ||
+				task.title?.toLowerCase().startsWith(code + ' '),
+			)
+			if (!collision) return code
+		} catch {
+			// If the check fails, just use the code — no point blocking on this
+			return code
+		}
+	}
+
+	// Extremely unlikely: 10 collisions in a row, just return the last one
+	let fallback = ''
+	for (let i = 0; i < 5; i++) {
+		fallback += chars[Math.floor(Math.random() * chars.length)]
+	}
+	return fallback
 }
 
 /** Re-generate prefix when target project changes */
-function onProjectChanged() {
-	titlePrefix.value = generatePrefix()
+async function onProjectChanged() {
+	titlePrefix.value = await generatePrefix()
 }
 
 /** Format total chain duration for display in selection list */
@@ -353,7 +382,7 @@ const computedPrefix = computed(() => {
 	if (!prefix) return ''
 	const separators = [' ', '_', '-', ':', '/', '.']
 	const lastChar = prefix[prefix.length - 1]
-	const sep = separators.includes(lastChar) ? '' : '_'
+	const sep = separators.includes(lastChar) ? '' : '-'
 	return prefix + sep
 })
 
@@ -437,13 +466,13 @@ const computedPreview = computed(() => {
 	})
 })
 
-watch(() => props.enabled, (val) => {
+watch(() => props.enabled, async (val) => {
 	if (val) {
 		loadChains()
 		resetState()
 		// Reset target to current project and auto-populate prefix
 		targetProjectId.value = props.projectId
-		titlePrefix.value = generatePrefix()
+		titlePrefix.value = await generatePrefix()
 	}
 })
 
