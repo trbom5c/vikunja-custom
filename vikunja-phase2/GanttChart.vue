@@ -222,7 +222,6 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 			hasActualDates: Boolean(t.startDate && (t.endDate || t.dueDate)),
 			dateType,
 			isDone: t.done,
-			isAutoGen: t.autoTemplateId > 0,
 		},
 	}
 }
@@ -356,25 +355,10 @@ let lastClickTime = 0
 let dragStarted = false
 
 const DOUBLE_CLICK_THRESHOLD_MS = 500
-// Use a larger drag threshold on touch devices to prevent accidental drags
 const DRAG_THRESHOLD_PIXELS = 5
-const TOUCH_DRAG_THRESHOLD_PIXELS = 20
-const TOUCH_HOLD_MS = 300 // Long-press duration before drag is allowed on touch
-
-function isTouchEvent(event: PointerEvent): boolean {
-	return event.pointerType === 'touch'
-}
-
-function getDragThreshold(event: PointerEvent): number {
-	return isTouchEvent(event) ? TOUCH_DRAG_THRESHOLD_PIXELS : DRAG_THRESHOLD_PIXELS
-}
 
 function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
-	// On touch devices, don't preventDefault — let the browser handle scrolling
-	// until we've confirmed the user intends to drag (long-press)
-	if (!isTouchEvent(event)) {
-		event.preventDefault()
-	}
+	event.preventDefault()
 	
 	const barIndex = ganttBars.value.findIndex(barGroup => barGroup.some(b => b.id === bar.id))
 	if (barIndex !== -1 && ganttRows.value[barIndex]) {
@@ -395,55 +379,24 @@ function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	
 	const startX = event.clientX
 	const startY = event.clientY
-	const threshold = getDragThreshold(event)
-	const isTouch = isTouchEvent(event)
-	let holdTimerFired = false
-	let holdTimer: ReturnType<typeof setTimeout> | null = null
-	
-	// For touch: require a long-press before drag starts
-	if (isTouch) {
-		holdTimer = setTimeout(() => {
-			holdTimerFired = true
-		}, TOUCH_HOLD_MS)
-	}
 	
 	const handleMove = (e: PointerEvent) => {
 		const diffX = Math.abs(e.clientX - startX)
 		const diffY = Math.abs(e.clientY - startY)
 		
-		// On touch, if the user moves before the hold timer, they're scrolling — cancel
-		if (isTouch && !holdTimerFired && (diffX > 5 || diffY > 5)) {
-			cleanup()
-			return
-		}
-		
-		// Start drag if moved past threshold (and hold requirement met for touch)
-		if (!dragStarted && (diffX > threshold || diffY > threshold)) {
-			if (isTouch && !holdTimerFired) {
-				// Touch moved too far before long-press — it's a scroll, not a drag
-				cleanup()
-				return
-			}
+		// Start drag if mouse moved more than threshhold
+		if (!dragStarted && (diffX > DRAG_THRESHOLD_PIXELS || diffY > DRAG_THRESHOLD_PIXELS)) {	
 			dragStarted = true
-			cleanup()
-			event.preventDefault() // Now we know it's intentional
+			document.removeEventListener('pointermove', handleMove)
+			document.removeEventListener('pointerup', handleStop)
 			startDrag(bar, event)
 		}
 	}
 	
 	const handleStop = () => {
-		cleanup()
-		// If no drag was started, this was just a tap (single click does nothing,
-		// double-tap opens task detail)
-	}
-	
-	function cleanup() {
 		document.removeEventListener('pointermove', handleMove)
 		document.removeEventListener('pointerup', handleStop)
-		if (holdTimer) {
-			clearTimeout(holdTimer)
-			holdTimer = null
-		}
+		// If no drag was started, this was just a click (do nothing)
 	}
 	
 	document.addEventListener('pointermove', handleMove)
@@ -531,12 +484,6 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 }
 
 function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEvent) {
-	// On touch devices, ignore resize entirely — too easy to trigger accidentally.
-	// Users should edit dates from the task detail view instead.
-	if (isTouchEvent(event)) {
-		return
-	}
-	
 	event.preventDefault()
 	event.stopPropagation() // Prevent drag from triggering
 	
@@ -641,7 +588,30 @@ function focusTaskBar(rowId: string) {
 	}, 0)
 }
 
+// Suppress native context menu on touch devices (conflicts with long-press-to-drag)
+let lastPointerType = ''
+function trackPointerType(e: PointerEvent) {
+	lastPointerType = e.pointerType
+}
+function suppressTouchContextMenu(e: MouseEvent) {
+	if (lastPointerType === 'touch') {
+		e.preventDefault()
+	}
+}
+
+const container = ganttContainer as unknown as {value: HTMLElement | null}
+watch(ganttContainer, (el) => {
+	if (el) {
+		(el as HTMLElement).addEventListener('pointerdown', trackPointerType, {passive: true})
+		;(el as HTMLElement).addEventListener('contextmenu', suppressTouchContextMenu)
+	}
+}, {immediate: true})
+
 onUnmounted(() => {
+	if (container.value) {
+		container.value.removeEventListener('pointerdown', trackPointerType)
+		container.value.removeEventListener('contextmenu', suppressTouchContextMenu)
+	}
 	if (dragMoveHandler) {
 		document.removeEventListener('pointermove', dragMoveHandler)
 		dragMoveHandler = null
@@ -657,9 +627,9 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .gantt-container {
 	overflow-x: auto;
-	// Allow horizontal panning on touch — the bar interaction handlers
-	// will only activate after a confirmed long-press
-	touch-action: pan-x pan-y;
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
 }
 
 .gantt-chart-wrapper {
