@@ -161,24 +161,19 @@ func TruncateAutoTaskLog(c *echo.Context) error {
 	})
 }
 
-// ResetAutoTaskSchedule resets the next_due_at to the next upcoming generate-at time.
+// HandleResetAutoTaskSchedule resets the next_due_at for an auto-task template.
 // @Summary Reset auto-task schedule
-// @tags autotask
+// @tags auto_task
 // @Accept json
 // @Produce json
-// @Security JWTKeyAuth
 // @Param id path int true "Auto-task template ID"
-// @Success 200 {object} map[string]interface{}
+// @Success 200 {object} map[string]string "Schedule reset"
+// @Failure 404 {object} web.HTTPError "Template not found"
 // @Router /autotasks/{id}/reset [post]
-func ResetAutoTaskSchedule(c *echo.Context) error {
+func HandleResetAutoTaskSchedule(c echo.Context) error {
 	templateID, err := strconv.ParseInt(c.Param("autotask"), 10, 64)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid template ID")
-	}
-
-	auth, err := auth2.GetAuthFromClaims(c)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	s := db.NewSession()
@@ -188,8 +183,7 @@ func ResetAutoTaskSchedule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not start transaction")
 	}
 
-	nextDue, err := models.ResetAutoTaskSchedule(s, templateID, auth.GetID())
-	if err != nil {
+	if err := models.ResetAutoTaskSchedule(s, templateID); err != nil {
 		_ = s.Rollback()
 		if _, ok := err.(models.ErrAutoTaskTemplateNotFound); ok {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -201,8 +195,7 @@ func ResetAutoTaskSchedule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not commit")
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"next_due_at": nextDue,
-		"message":     "Schedule reset successfully",
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Schedule reset successfully",
 	})
 }

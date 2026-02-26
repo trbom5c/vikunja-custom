@@ -89,12 +89,13 @@ Copy-Item "$PATCH\auto_task_handler.go" "$ROOT\pkg\routes\api\v1\auto_task_handl
 # ===========================
 #  BACKEND - Migrations
 # ===========================
-Step "Migrations (5 files)"
+Step "Migrations (6 files)"
 Copy-Item "$PATCH\20260224050000.go" "$ROOT\pkg\migration\20260224050000.go" -Force
 Copy-Item "$PATCH\20260224060000.go" "$ROOT\pkg\migration\20260224060000.go" -Force
 Copy-Item "$PATCH\20260224070000.go" "$ROOT\pkg\migration\20260224070000.go" -Force
 Copy-Item "$PATCH\20260224080000.go" "$ROOT\pkg\migration\20260224080000.go" -Force
 Copy-Item "$PATCH\20260224090000.go" "$ROOT\pkg\migration\20260224090000.go" -Force
+Copy-Item "$PATCH\20260227000000.go" "$ROOT\pkg\migration\20260227000000.go" -Force
 
 # ===========================
 #  BACKEND - Routes
@@ -198,7 +199,7 @@ Write-Host "--- Patch Summary ---" -ForegroundColor Yellow
 Write-Host "  Backend Go models    : 6 files (tasks.go, auto_task_*, task_chain*)" -ForegroundColor Gray
 Write-Host "  Backend cron + init  : 2 files (auto_task_cron.go, init.go)" -ForegroundColor Gray
 Write-Host "  Backend handlers     : 2 files (echo v5)" -ForegroundColor Gray
-Write-Host "  Migrations           : 5 files" -ForegroundColor Gray
+Write-Host "  Migrations           : 6 files" -ForegroundColor Gray
 Write-Host "  Routes               : 1 file" -ForegroundColor Gray
 Write-Host "  Gantt components     : 7 files (arrows, settings+i18n, chart, bars, grid, header, config)" -ForegroundColor Gray
 Write-Host "  Chain components     : 3 files" -ForegroundColor Gray

@@ -78,3 +78,8 @@ export async function truncateAutoTaskLog(templateId: number, keep: number = 0):
 	const response = await http.post(`/autotasks/${templateId}/log/truncate?keep=${keep}`, {})
 	return response.data
 }
+
+export async function resetAutoTaskSchedule(id: number): Promise<any> {
+	const response = await http.post(`/autotasks/${id}/reset`, {})
+	return response.data
+}

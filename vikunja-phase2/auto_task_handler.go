@@ -170,7 +170,7 @@ func TruncateAutoTaskLog(c *echo.Context) error {
 // @Success 200 {object} map[string]string "Schedule reset"
 // @Failure 404 {object} web.HTTPError "Template not found"
 // @Router /autotasks/{id}/reset [post]
-func HandleResetAutoTaskSchedule(c echo.Context) error {
+func HandleResetAutoTaskSchedule(c *echo.Context) error {
 	templateID, err := strconv.ParseInt(c.Param("autotask"), 10, 64)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid template ID")
