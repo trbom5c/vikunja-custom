@@ -32,6 +32,13 @@
 			>
 				<template #default="{ focusedRow, focusedCell }">
 					<div class="gantt-rows">
+						<GanttDependencyArrows
+							:bars-by-row="ganttBars"
+							:tasks="tasks"
+							:date-from="dateFromDate"
+							:day-width-pixels="DAY_WIDTH_PIXELS"
+							:total-width="totalWidth"
+						/>
 						<GanttRow
 							v-for="(rowId, index) in ganttRows"
 							:id="rowId"
@@ -71,6 +78,7 @@ import dayjs from 'dayjs'
 import {useDayjsLanguageSync} from '@/i18n/useDayjsLanguageSync'
 
 import {getHexColor} from '@/models/task'
+import {useProjectStore} from '@/stores/projects'
 
 import type {ITask, ITaskPartialWithId} from '@/modelTypes/ITask'
 import type {DateISO} from '@/types/DateISO'
@@ -82,18 +90,22 @@ import GanttRow from '@/components/gantt/GanttRow.vue'
 import GanttRowBars from '@/components/gantt/GanttRowBars.vue'
 import GanttVerticalGridLines from '@/components/gantt/GanttVerticalGridLines.vue'
 import GanttTimelineHeader from '@/components/gantt/GanttTimelineHeader.vue'
+import GanttDependencyArrows from '@/components/gantt/GanttDependencyArrows.vue'
 import Loading from '@/components/misc/Loading.vue'
 
 import {MILLISECONDS_A_DAY} from '@/constants/date'
 import {roundToNaturalDayBoundary} from '@/helpers/time/roundToNaturalDayBoundary'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
 	isLoading: boolean,
 	filters: GanttFilters,
 	tasks: Map<ITask['id'], ITask>,
 	defaultTaskStartDate: DateISO
 	defaultTaskEndDate: DateISO
-}>()
+	subprojectColorMap?: Map<number, string>
+}>(), {
+	subprojectColorMap: () => new Map(),
+})
 
 const emit = defineEmits<{
   (e: 'update:task', task: ITaskPartialWithId): void
@@ -104,6 +116,7 @@ const DAY_WIDTH_PIXELS = 30
 const {tasks, filters} = toRefs(props)
 
 const dayjsLanguageLoading = useDayjsLanguageSync(dayjs)
+const projectStore = useProjectStore()
 const ganttContainer = ref(null)
 const ganttChartBodyRef = ref<InstanceType<typeof GanttChartBody> | null>(null)
 const router = useRouter()
@@ -192,7 +205,11 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 		dateType = 'both'
 	}
 
+	// Color cascade: task hex -> subprojectColorMap prop -> projectStore -> fallback
 	const taskColor = getHexColor(t.hexColor)
+	const subprojectColor = props.subprojectColorMap?.get(t.projectId) || null
+	const storeColor = getHexColor(projectStore.projects[t.projectId]?.hexColor ?? '')
+	const effectiveColor = taskColor || subprojectColor || storeColor || undefined
 
 	return {
 		id: String(t.id),
@@ -201,7 +218,7 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 		meta: {
 			label: t.title,
 			task: t,
-			color: taskColor,
+			color: effectiveColor,
 			hasActualDates: Boolean(t.startDate && (t.endDate || t.dueDate)),
 			dateType,
 			isDone: t.done,
@@ -209,8 +226,12 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 	}
 }
 
+// Reactive triggers: force bar re-render when color sources become available
+const projectStoreReady = computed(() => Object.keys(projectStore.projects).length)
+const colorMapReady = computed(() => props.subprojectColorMap?.size ?? 0)
+
 watch(
-	[tasks, filters],
+	[tasks, filters, colorMapReady, projectStoreReady],
 	() => {
 		const bars: GanttBarModel[] = []
 		const rows: string[] = []
@@ -219,18 +240,47 @@ watch(
 		const filteredTasks = Array.from(tasks.value.values()).filter(task => {
 			const hasAnyDate = Boolean(task.startDate || task.endDate || task.dueDate)
 
+			// Hide done tasks unless checkbox is on
+			if (task.done && !filters.value.showDoneTasks) {
+				return false
+			}
+
 			if (!filters.value.showTasksWithoutDates && !hasAnyDate) {
 				return false
 			}
 
+			// Dateless tasks always visible when checkbox is on
+			if (!hasAnyDate && filters.value.showTasksWithoutDates) {
+				return true
+			}
+
+			// Incomplete tasks are always visible (clamped to left edge if out of range)
+			if (!task.done) {
+				return true
+			}
+
 			const bar = transformTaskToGanttBar(task)
 
-			// Task is visible if it overlaps with the current date range
+			// Done tasks only visible if they overlap the current date range
 			return bar.start <= dateToDate.value && bar.end >= dateFromDate.value
 		})
 		
 		filteredTasks.forEach((t, index) => {
 			const bar = transformTaskToGanttBar(t)
+
+			// Clamp out-of-range bars to the visible left edge
+			if (bar.end < dateFromDate.value) {
+				bar.meta.isOverdue = true
+				bar.meta.originalStart = new Date(bar.start)
+				bar.meta.originalEnd = new Date(bar.end)
+				bar.start = dateFromDate.value
+				const oneDay = new Date(dateFromDate.value)
+				oneDay.setDate(oneDay.getDate() + 1)
+				bar.end = oneDay
+			} else if (bar.start < dateFromDate.value) {
+				bar.start = dateFromDate.value
+			}
+
 			bars.push(bar)
 			
 			const rowId = `row-${index}`
@@ -306,9 +356,20 @@ let dragStarted = false
 
 const DOUBLE_CLICK_THRESHOLD_MS = 500
 const DRAG_THRESHOLD_PIXELS = 5
+const TOUCH_DRAG_THRESHOLD_PIXELS = 20
+const TOUCH_HOLD_MS = 300
+
+function isTouchEvent(e: PointerEvent): boolean {
+	return e.pointerType === 'touch'
+}
 
 function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
-	event.preventDefault()
+	const isTouch = isTouchEvent(event)
+
+	// Only preventDefault immediately for mouse — touch needs native scroll to work
+	if (!isTouch) {
+		event.preventDefault()
+	}
 	
 	const barIndex = ganttBars.value.findIndex(barGroup => barGroup.some(b => b.id === bar.id))
 	if (barIndex !== -1 && ganttRows.value[barIndex]) {
@@ -329,28 +390,85 @@ function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	
 	const startX = event.clientX
 	const startY = event.clientY
-	
-	const handleMove = (e: PointerEvent) => {
-		const diffX = Math.abs(e.clientX - startX)
-		const diffY = Math.abs(e.clientY - startY)
-		
-		// Start drag if mouse moved more than threshhold
-		if (!dragStarted && (diffX > DRAG_THRESHOLD_PIXELS || diffY > DRAG_THRESHOLD_PIXELS)) {	
-			dragStarted = true
+	const threshold = isTouch ? TOUCH_DRAG_THRESHOLD_PIXELS : DRAG_THRESHOLD_PIXELS
+
+	if (isTouch) {
+		// Touch: require a long-press hold before drag activates
+		let holdConfirmed = false
+		let cancelled = false
+
+		const holdTimer = setTimeout(() => {
+			if (!cancelled) {
+				holdConfirmed = true
+				// Provide haptic-like feedback via class
+				const barEl = (event.target as Element)?.closest('g')
+				barEl?.classList.add('gantt-bar-held')
+			}
+		}, TOUCH_HOLD_MS)
+
+		const handleMove = (e: PointerEvent) => {
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
+
+			if (!holdConfirmed) {
+				// Finger moved before hold timer — cancel, let browser scroll
+				if (diffX > threshold || diffY > threshold) {
+					cancelled = true
+					clearTimeout(holdTimer)
+					cleanup()
+				}
+				return
+			}
+
+			// Hold confirmed — now check drag threshold from hold point
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {
+				dragStarted = true
+				cleanup()
+				// Pass current event (not original) so startX is accurate
+				startDrag(bar, e)
+			}
+		}
+
+		const handleStop = () => {
+			cancelled = true
+			clearTimeout(holdTimer)
+			cleanup()
+			// Remove held visual
+			const barEl = (event.target as Element)?.closest('g')
+			barEl?.classList.remove('gantt-bar-held')
+		}
+
+		const cleanup = () => {
 			document.removeEventListener('pointermove', handleMove)
 			document.removeEventListener('pointerup', handleStop)
-			startDrag(bar, event)
+			document.removeEventListener('pointercancel', handleStop)
 		}
+
+		document.addEventListener('pointermove', handleMove)
+		document.addEventListener('pointerup', handleStop)
+		document.addEventListener('pointercancel', handleStop)
+	} else {
+		// Mouse: immediate drag on threshold
+		const handleMove = (e: PointerEvent) => {
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
+			
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {	
+				dragStarted = true
+				document.removeEventListener('pointermove', handleMove)
+				document.removeEventListener('pointerup', handleStop)
+				startDrag(bar, e)
+			}
+		}
+		
+		const handleStop = () => {
+			document.removeEventListener('pointermove', handleMove)
+			document.removeEventListener('pointerup', handleStop)
+		}
+		
+		document.addEventListener('pointermove', handleMove)
+		document.addEventListener('pointerup', handleStop)
 	}
-	
-	const handleStop = () => {
-		document.removeEventListener('pointermove', handleMove)
-		document.removeEventListener('pointerup', handleStop)
-		// If no drag was started, this was just a click (do nothing)
-	}
-	
-	document.addEventListener('pointermove', handleMove)
-	document.addEventListener('pointerup', handleStop)
 }
 
 function setCursor(cursor: string, barElement?: Element | null) {
@@ -368,7 +486,14 @@ function clearCursor(barElement?: Element | null) {
 }
 
 function startDrag(bar: GanttBarModel, event: PointerEvent) {
+	// Now that drag is confirmed, prevent default to stop scrolling
 	event.preventDefault()
+
+	// Don't allow dragging overdue clamped bars
+	if (bar.meta?.isOverdue) {
+		openTask(bar)
+		return
+	}
 	
 	isDragging.value = true
 	dragState.value = {
@@ -383,7 +508,11 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	const barElement = barGroup?.querySelector('.gantt-bar')
 	setCursor('grabbing', barElement)
 	
+	// Remove held visual if present
+	barGroup?.classList.remove('gantt-bar-held')
+	
 	const handleMove = (e: PointerEvent) => {
+		e.preventDefault() // Prevent scrolling while actively dragging
 		if (!dragState.value || !isDragging.value) return
 		
 		const diff = e.clientX - dragState.value.startX
@@ -401,6 +530,7 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 		}
 		if (dragStopHandler) {
 			document.removeEventListener('pointerup', dragStopHandler)
+			document.removeEventListener('pointercancel', dragStopHandler)
 			dragStopHandler = null
 		}
 		
@@ -425,9 +555,13 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	
 	document.addEventListener('pointermove', handleMove)
 	document.addEventListener('pointerup', handleStop)
+	document.addEventListener('pointercancel', handleStop)
 }
 
 function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEvent) {
+	// Disable resize on touch — handles are hidden but just in case
+	if (isTouchEvent(event)) return
+
 	event.preventDefault()
 	event.stopPropagation() // Prevent drag from triggering
 	
@@ -532,7 +666,30 @@ function focusTaskBar(rowId: string) {
 	}, 0)
 }
 
+// Suppress native context menu on touch devices (conflicts with long-press-to-drag)
+let lastPointerType = ''
+function trackPointerType(e: PointerEvent) {
+	lastPointerType = e.pointerType
+}
+function suppressTouchContextMenu(e: MouseEvent) {
+	if (lastPointerType === 'touch') {
+		e.preventDefault()
+	}
+}
+
+const container = ganttContainer as unknown as {value: HTMLElement | null}
+watch(ganttContainer, (el) => {
+	if (el) {
+		(el as HTMLElement).addEventListener('pointerdown', trackPointerType, {passive: true})
+		;(el as HTMLElement).addEventListener('contextmenu', suppressTouchContextMenu)
+	}
+}, {immediate: true})
+
 onUnmounted(() => {
+	if (container.value) {
+		container.value.removeEventListener('pointerdown', trackPointerType)
+		container.value.removeEventListener('contextmenu', suppressTouchContextMenu)
+	}
 	if (dragMoveHandler) {
 		document.removeEventListener('pointermove', dragMoveHandler)
 		dragMoveHandler = null
@@ -548,6 +705,17 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .gantt-container {
 	overflow-x: auto;
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	touch-action: pan-x pan-y;
+}
+
+// Visual feedback when touch-hold is confirmed
+:deep(.gantt-bar-held .gantt-bar) {
+	filter: brightness(1.2);
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
 }
 
 .gantt-chart-wrapper {
