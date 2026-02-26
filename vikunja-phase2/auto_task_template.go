@@ -36,8 +36,8 @@ type AutoTaskTemplate struct {
 	// The user who owns this template.
 	OwnerID int64      `xorm:"bigint not null INDEX" json:"-"`
 	Owner   *user.User `xorm:"-" json:"owner" valid:"-"`
-	// The project to create tasks in. 0 = user's default project.
-	ProjectID int64 `xorm:"bigint null" json:"project_id"`
+	// The projects to create tasks in. Empty = user's default project.
+	ProjectIDs []int64 `xorm:"json null" json:"project_ids"`
 	// The task title.
 	Title string `xorm:"varchar(250) not null" json:"title" valid:"required,runelength(1|250)" minLength:"1" maxLength:"250"`
 	// Optional description for the generated task.
@@ -201,7 +201,7 @@ func (a *AutoTaskTemplate) Update(s *xorm.Session, _ web.Auth) error {
 	}
 
 	_, err := s.ID(a.ID).Cols(
-		"title", "description", "project_id", "priority", "hex_color",
+		"title", "description", "project_ids", "priority", "hex_color",
 		"label_ids", "assignee_ids",
 		"interval_value", "interval_unit", "start_date", "end_date",
 		"active", "next_due_at",
