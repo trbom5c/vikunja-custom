@@ -28,26 +28,21 @@ func init() {
 		ID:          "20260227000000",
 		Description: "Convert auto_task_templates.project_id (single) to project_ids (JSON array)",
 		Migrate: func(tx *xorm.Engine) error {
-			// Step 1: Add the new project_ids JSON column
-			_, err := tx.Exec(`ALTER TABLE auto_task_templates ADD COLUMN project_ids TEXT NULL`)
-			if err != nil {
-				return fmt.Errorf("add project_ids column: %w", err)
-			}
+			// Step 1: Add the new project_ids JSON column (skip if already exists from xorm sync)
+			_, _ = tx.Exec(`ALTER TABLE auto_task_templates ADD COLUMN project_ids TEXT NULL`)
 
 			// Step 2: Migrate existing data — convert scalar project_id to JSON array
 			// project_id > 0 → [project_id], NULL/0 → NULL (use default)
-			_, err = tx.Exec(`
+			_, err := tx.Exec(`
 				UPDATE auto_task_templates
 				SET project_ids = '[' || CAST(project_id AS TEXT) || ']'
 				WHERE project_id IS NOT NULL AND project_id > 0
+				  AND (project_ids IS NULL OR project_ids = '' OR project_ids = 'null')
 			`)
 			if err != nil {
 				return fmt.Errorf("migrate project_id to project_ids: %w", err)
 			}
 
-			// Step 3: Drop the old column
-			// SQLite doesn't support DROP COLUMN before 3.35.0, so we use a safe approach
-			// Just leave project_id in place — xorm will ignore it since the struct no longer references it
 			return nil
 		},
 		Rollback: func(tx *xorm.Engine) error {
