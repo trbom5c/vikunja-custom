@@ -32,10 +32,10 @@ func init() {
 			_, _ = tx.Exec(`ALTER TABLE auto_task_templates ADD COLUMN project_ids TEXT NULL`)
 
 			// Step 2: Migrate existing data — convert scalar project_id to JSON array
-			// project_id > 0 → [project_id], NULL/0 → NULL (use default)
+			// Use CONCAT for MariaDB/MySQL compatibility (|| is logical OR in MySQL)
 			_, err := tx.Exec(`
 				UPDATE auto_task_templates
-				SET project_ids = '[' || CAST(project_id AS TEXT) || ']'
+				SET project_ids = CONCAT('[', CAST(project_id AS CHAR), ']')
 				WHERE project_id IS NOT NULL AND project_id > 0
 				  AND (project_ids IS NULL OR project_ids = '' OR project_ids = 'null')
 			`)
