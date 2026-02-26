@@ -286,6 +286,32 @@ func TriggerAutoTaskFromAuth(s *xorm.Session, templateID int64, auth web.Auth) (
 	return TriggerAutoTask(s, templateID, u)
 }
 
+// ResetAutoTaskSchedule recalculates next_due_at from NOW, ignoring history.
+func ResetAutoTaskSchedule(s *xorm.Session, templateID int64) error {
+	tmpl := &AutoTaskTemplate{ID: templateID}
+	has, err := s.Get(tmpl)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return ErrAutoTaskTemplateNotFound{ID: templateID}
+	}
+
+	// Calculate next generate-at from now
+	now := time.Now()
+	genHour := tmpl.StartDate.Hour()
+	genMin := tmpl.StartDate.Minute()
+
+	next := time.Date(now.Year(), now.Month(), now.Day(), genHour, genMin, 0, 0, now.Location())
+	if !next.After(now) {
+		next = advanceFromTime(next, tmpl.IntervalValue, tmpl.IntervalUnit)
+	}
+
+	tmpl.NextDueAt = &next
+	_, err = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
+	return err
+}
+
 // CheckAutoTasksFromAuth is a convenience wrapper that resolves the user from web.Auth.
 func CheckAutoTasksFromAuth(s *xorm.Session, auth web.Auth) ([]*Task, error) {
 	u := auth.(*user.User)
