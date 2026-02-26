@@ -267,7 +267,7 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 		AutoTemplateID: tmpl.ID,
 	}
 
-	err := createTask(s, task, u, false, false)
+	err := createTask(s, task, u, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("auto-task create failed for template %d: %w", tmpl.ID, err)
 	}
