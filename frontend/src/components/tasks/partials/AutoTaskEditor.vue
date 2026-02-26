@@ -85,11 +85,11 @@
 						{{ $t('task.autoTask.at') }} {{ formatTimeOfDay(tmpl.next_due_at) }}
 					</span>
 					<span
-						v-if="tmpl.project_id"
+						v-if="tmpl.project_ids && tmpl.project_ids.length"
 						class="meta-item"
 					>
 						<Icon icon="layer-group" class="meta-icon" />
-						{{ getProjectTitle(tmpl.project_id) }}
+						{{ tmpl.project_ids.map(id => getProjectTitle(id)).join(', ') }}
 					</span>
 					<span
 						v-else
@@ -123,6 +123,7 @@
 		<Modal
 			:enabled="showEditModal"
 			@close="closeModal"
+			variant="scrolling"
 		>
 			<Card
 				class="auto-task-modal"
@@ -188,11 +189,33 @@
 						<p class="help">{{ $t('task.autoTask.generateAtHelp') }}</p>
 					</div>
 
-					<!-- Project -->
+					<!-- Projects (multi-select) -->
 					<div class="field">
-						<label class="label">{{ $t('task.autoTask.targetProject') }}</label>
-						<ProjectSearch v-model="selectedProject" />
-						<p class="help">{{ $t('task.autoTask.targetProjectHelp') }}</p>
+						<label class="label">{{ $t('task.autoTask.targetProjects') }}</label>
+						<Multiselect
+							v-model="selectedProjects"
+							:loading="false"
+							:search-results="filteredProjects"
+							label="title"
+							:multiple="true"
+							:create-enabled="false"
+							placeholder="Type to add a project..."
+							@search="(q: string) => projectQuery = q"
+						>
+							<template #tag="{item}">
+								<span class="tag-badge project-tag">
+									<Icon icon="layer-group" class="tag-icon" />
+									{{ item.title }}
+									<BaseButton
+										class="remove-tag"
+										@click.prevent.stop="removeSelectedProject(item)"
+									>
+										<Icon icon="times" />
+									</BaseButton>
+								</span>
+							</template>
+						</Multiselect>
+						<p class="help">{{ $t('task.autoTask.targetProjectsHelp') }}</p>
 					</div>
 
 					<!-- Priority -->
@@ -321,9 +344,9 @@
 		<Modal
 			:enabled="showLogModal"
 			@close="showLogModal = false"
+			variant="scrolling"
 		>
 			<Card
-				class="log-modal-card"
 				:title="$t('task.autoTask.generationLog') + (logTemplate ? ': ' + logTemplate.title : '')"
 				:has-close="true"
 				@close="showLogModal = false"
@@ -357,41 +380,8 @@
 							class="log-summary-row"
 						>
 							<span class="log-summary-label">{{ $t('task.autoTask.nextDue') }}:</span>
-							<span class="log-next-value">
-								<span
-									:class="{'has-text-danger': isOverdue(logTemplate.next_due_at)}"
-									@dblclick="resetSchedule(logTemplate)"
-									v-tooltip="$t('task.autoTask.resetHint')"
-								>
-									{{ formatDate(logTemplate.next_due_at) }}
-								</span>
-								<BaseButton
-									v-if="!showResetConfirm"
-									class="reset-schedule-btn"
-									v-tooltip="$t('task.autoTask.resetSchedule')"
-									@click="showResetConfirm = true"
-								>
-									<Icon icon="redo" />
-								</BaseButton>
-								<span
-									v-if="showResetConfirm"
-									class="reset-confirm"
-								>
-									<span class="reset-confirm-text">{{ $t('task.autoTask.resetConfirm') }}</span>
-									<BaseButton
-										class="reset-confirm-btn is-yes"
-										:class="{'is-loading': resetting}"
-										@click="resetSchedule(logTemplate)"
-									>
-										<Icon icon="check" />
-									</BaseButton>
-									<BaseButton
-										class="reset-confirm-btn is-no"
-										@click="showResetConfirm = false"
-									>
-										<Icon icon="times" />
-									</BaseButton>
-								</span>
+							<span :class="{'has-text-danger': isOverdue(logTemplate.next_due_at)}">
+								{{ formatDate(logTemplate.next_due_at) }}
 							</span>
 						</div>
 						<div class="log-summary-row">
@@ -550,7 +540,6 @@ import {
 	deleteAutoTask as deleteAutoTaskApi,
 	triggerAutoTask,
 	truncateAutoTaskLog,
-	resetAutoTaskSchedule,
 	emptyAutoTaskTemplate,
 } from '@/services/autoTaskApi'
 import type {IAutoTaskTemplate} from '@/services/autoTaskApi'
@@ -561,13 +550,11 @@ import Modal from '@/components/misc/Modal.vue'
 import Card from '@/components/misc/Card.vue'
 import Datepicker from '@/components/input/Datepicker.vue'
 import PrioritySelect from '@/components/tasks/partials/PrioritySelect.vue'
-import ProjectSearch from '@/components/tasks/partials/ProjectSearch.vue'
 import Multiselect from '@/components/input/Multiselect.vue'
 import LabelModel from '@/models/label'
 import {getRandomColorHex} from '@/helpers/color/randomColor'
 import Editor from '@/components/input/AsyncEditor'
 
-import ProjectModel from '@/models/project'
 import type {IProject} from '@/modelTypes/IProject'
 import type {ILabel} from '@/modelTypes/ILabel'
 
@@ -592,11 +579,26 @@ const showLogModal = ref(false)
 const logTemplate = ref<IAutoTaskTemplate | null>(null)
 
 // Typed v-model intermediaries for Vikunja components
-const selectedProject = ref<IProject>(new ProjectModel())
+const selectedProjects = ref<IProject[]>([])
 const selectedLabels = ref<ILabel[]>([])
 const editStartDate = ref<Date | null>(new Date())
 const editEndDate = ref<Date | null>(null)
 const generateAtTime = ref('02:00')
+
+// Project search for multi-select
+const projectQuery = ref('')
+const filteredProjects = computed(() => {
+	const query = projectQuery.value.toLowerCase()
+	const selectedIds = new Set(selectedProjects.value.map(p => p.id))
+	return Object.values(projectStore.projects)
+		.filter((p: any) => !p.isArchived && p.id > 0 && !selectedIds.has(p.id))
+		.filter((p: any) => !query || p.title.toLowerCase().includes(query))
+		.sort((a: any, b: any) => a.title.localeCompare(b.title))
+})
+
+function removeSelectedProject(project: IProject) {
+	selectedProjects.value = selectedProjects.value.filter(p => p.id !== project.id)
+}
 
 // Label search
 const labelQuery = ref('')
@@ -637,10 +639,10 @@ async function createAndAddLabel(title: string) {
 	}
 }
 
-// Sync project object ↔ editForm.project_id
-watch(selectedProject, (proj) => {
-	editForm.value.project_id = proj?.id || 0
-})
+// Sync project objects ↔ editForm.project_ids
+watch(selectedProjects, (projects) => {
+	editForm.value.project_ids = projects.map(p => p.id).filter(id => id > 0)
+}, {deep: true})
 
 onMounted(async () => {
 	await Promise.all([
@@ -685,8 +687,6 @@ function openLogModal(tmpl: IAutoTaskTemplate) {
 }
 
 const truncating = ref(false)
-const resetting = ref(false)
-const showResetConfirm = ref(false)
 const showClearConfirm = ref(false)
 
 function confirmClearLog() {
@@ -716,26 +716,6 @@ async function truncateLog(keep: number) {
 	}
 }
 
-async function resetSchedule(tmpl: IAutoTaskTemplate) {
-	if (!tmpl?.id) return
-	resetting.value = true
-	showResetConfirm.value = false
-	try {
-		const result = await resetAutoTaskSchedule(tmpl.id)
-		await loadTemplates()
-		// Refresh the log modal reference
-		const refreshed = templates.value.find((t: IAutoTaskTemplate) => t.id === tmpl.id)
-		if (refreshed) {
-			logTemplate.value = refreshed
-		}
-		success({message: t('task.autoTask.resetSuccess')})
-	} catch (e: any) {
-		error({message: e?.message || t('task.autoTask.resetError')})
-	} finally {
-		resetting.value = false
-	}
-}
-
 function logEntryIcon(entry: any): string | string[] {
 	switch (entry.trigger_type) {
 		case 'completed': return 'check'
@@ -757,7 +737,7 @@ function logEntryLabel(entry: any): string {
 function openCreate() {
 	editingTemplate.value = null
 	editForm.value = emptyAutoTaskTemplate()
-	selectedProject.value = new ProjectModel()
+	selectedProjects.value = []
 	selectedLabels.value = []
 	editStartDate.value = new Date()
 	editEndDate.value = null
@@ -769,12 +749,11 @@ function editTemplate(tmpl: IAutoTaskTemplate) {
 	editingTemplate.value = tmpl
 	editForm.value = {...tmpl}
 
-	// Load project object from store
-	if (tmpl.project_id && projectStore.projects[tmpl.project_id]) {
-		selectedProject.value = projectStore.projects[tmpl.project_id]
-	} else {
-		selectedProject.value = new ProjectModel()
-	}
+	// Load project objects from store
+	const ids = tmpl.project_ids || []
+	selectedProjects.value = ids
+		.map(id => projectStore.projects[id])
+		.filter(Boolean) as IProject[]
 
 	// Labels: convert IDs to label objects from the store (best effort)
 	selectedLabels.value = []
@@ -808,7 +787,7 @@ async function saveTemplate() {
 	const [hh, mm] = generateAtTime.value.split(':').map(Number)
 
 	// Sync typed values back to the flat form
-	editForm.value.project_id = selectedProject.value?.id || 0
+	editForm.value.project_ids = selectedProjects.value.map(p => p.id).filter(id => id > 0)
 	editForm.value.label_ids = selectedLabels.value.map(l => l.id)
 
 	// Apply the chosen time-of-day to start_date
@@ -1005,26 +984,9 @@ defineExpose({openCreate})
 	gap: .35rem;
 }
 
-// Edit modal — constrain width + internal scroll for default (centered) variant
-.auto-task-modal {
-	text-align: start;
-	max-inline-size: 560px;
-	inline-size: 90vw;
-	max-block-size: 80vh;
-	overflow-y: auto;
-}
-
-// Log viewer modal — same centered approach
-:deep(.log-modal-card) {
-	text-align: start;
-	max-inline-size: 560px;
-	inline-size: 90vw;
-	max-block-size: 80vh;
-	overflow-y: auto;
-}
-
+// Log viewer modal
 .log-modal-content {
-	min-inline-size: 0;
+	min-inline-size: 400px;
 }
 
 .log-summary {
@@ -1043,64 +1005,6 @@ defineExpose({openCreate})
 	color: var(--grey-500);
 	min-inline-size: 120px;
 	font-weight: 500;
-}
-
-.log-next-value {
-	display: inline-flex;
-	align-items: center;
-	gap: .4rem;
-}
-
-.reset-schedule-btn {
-	padding: .1rem .3rem;
-	border-radius: $radius;
-	color: var(--grey-400);
-	font-size: .7rem;
-	transition: color $transition, background $transition;
-	opacity: 0.5;
-
-	&:hover {
-		color: var(--primary);
-		background: var(--grey-100);
-		opacity: 1;
-	}
-}
-
-.reset-confirm {
-	display: inline-flex;
-	align-items: center;
-	gap: .25rem;
-	font-size: .75rem;
-	margin-inline-start: .25rem;
-}
-
-.reset-confirm-text {
-	color: var(--warning);
-	font-weight: 500;
-}
-
-.reset-confirm-btn {
-	padding: .15rem .35rem;
-	border-radius: $radius;
-	font-size: .7rem;
-
-	&.is-yes {
-		color: var(--success);
-
-		&:hover {
-			background: var(--success);
-			color: var(--white);
-		}
-	}
-
-	&.is-no {
-		color: var(--danger);
-
-		&:hover {
-			background: var(--danger);
-			color: var(--white);
-		}
-	}
 }
 
 .log-divider {
@@ -1302,5 +1206,33 @@ defineExpose({openCreate})
 	border-radius: $radius;
 	background: hsla(var(--danger-h), var(--danger-s), var(--danger-l), .05);
 	border: 1px solid hsla(var(--danger-h), var(--danger-s), var(--danger-l), .2);
+}
+
+.project-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: .25rem;
+	padding: .15rem .5rem;
+	border-radius: $radius;
+	background: var(--grey-100);
+	font-size: .85rem;
+	line-height: 1.5;
+
+	.tag-icon {
+		font-size: .75rem;
+		opacity: .6;
+	}
+
+	.remove-tag {
+		margin-inline-start: .15rem;
+		opacity: .5;
+		font-size: .7rem;
+		cursor: pointer;
+
+		&:hover {
+			opacity: 1;
+			color: var(--danger);
+		}
+	}
 }
 </style>

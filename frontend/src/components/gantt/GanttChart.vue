@@ -356,9 +356,20 @@ let dragStarted = false
 
 const DOUBLE_CLICK_THRESHOLD_MS = 500
 const DRAG_THRESHOLD_PIXELS = 5
+const TOUCH_DRAG_THRESHOLD_PIXELS = 20
+const TOUCH_HOLD_MS = 300
+
+function isTouchEvent(e: PointerEvent): boolean {
+	return e.pointerType === 'touch'
+}
 
 function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
-	event.preventDefault()
+	const isTouch = isTouchEvent(event)
+
+	// Only preventDefault immediately for mouse — touch needs native scroll to work
+	if (!isTouch) {
+		event.preventDefault()
+	}
 	
 	const barIndex = ganttBars.value.findIndex(barGroup => barGroup.some(b => b.id === bar.id))
 	if (barIndex !== -1 && ganttRows.value[barIndex]) {
@@ -379,28 +390,85 @@ function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	
 	const startX = event.clientX
 	const startY = event.clientY
-	
-	const handleMove = (e: PointerEvent) => {
-		const diffX = Math.abs(e.clientX - startX)
-		const diffY = Math.abs(e.clientY - startY)
-		
-		// Start drag if mouse moved more than threshhold
-		if (!dragStarted && (diffX > DRAG_THRESHOLD_PIXELS || diffY > DRAG_THRESHOLD_PIXELS)) {	
-			dragStarted = true
+	const threshold = isTouch ? TOUCH_DRAG_THRESHOLD_PIXELS : DRAG_THRESHOLD_PIXELS
+
+	if (isTouch) {
+		// Touch: require a long-press hold before drag activates
+		let holdConfirmed = false
+		let cancelled = false
+
+		const holdTimer = setTimeout(() => {
+			if (!cancelled) {
+				holdConfirmed = true
+				// Provide haptic-like feedback via class
+				const barEl = (event.target as Element)?.closest('g')
+				barEl?.classList.add('gantt-bar-held')
+			}
+		}, TOUCH_HOLD_MS)
+
+		const handleMove = (e: PointerEvent) => {
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
+
+			if (!holdConfirmed) {
+				// Finger moved before hold timer — cancel, let browser scroll
+				if (diffX > threshold || diffY > threshold) {
+					cancelled = true
+					clearTimeout(holdTimer)
+					cleanup()
+				}
+				return
+			}
+
+			// Hold confirmed — now check drag threshold from hold point
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {
+				dragStarted = true
+				cleanup()
+				// Pass current event (not original) so startX is accurate
+				startDrag(bar, e)
+			}
+		}
+
+		const handleStop = () => {
+			cancelled = true
+			clearTimeout(holdTimer)
+			cleanup()
+			// Remove held visual
+			const barEl = (event.target as Element)?.closest('g')
+			barEl?.classList.remove('gantt-bar-held')
+		}
+
+		const cleanup = () => {
 			document.removeEventListener('pointermove', handleMove)
 			document.removeEventListener('pointerup', handleStop)
-			startDrag(bar, event)
+			document.removeEventListener('pointercancel', handleStop)
 		}
+
+		document.addEventListener('pointermove', handleMove)
+		document.addEventListener('pointerup', handleStop)
+		document.addEventListener('pointercancel', handleStop)
+	} else {
+		// Mouse: immediate drag on threshold
+		const handleMove = (e: PointerEvent) => {
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
+			
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {	
+				dragStarted = true
+				document.removeEventListener('pointermove', handleMove)
+				document.removeEventListener('pointerup', handleStop)
+				startDrag(bar, e)
+			}
+		}
+		
+		const handleStop = () => {
+			document.removeEventListener('pointermove', handleMove)
+			document.removeEventListener('pointerup', handleStop)
+		}
+		
+		document.addEventListener('pointermove', handleMove)
+		document.addEventListener('pointerup', handleStop)
 	}
-	
-	const handleStop = () => {
-		document.removeEventListener('pointermove', handleMove)
-		document.removeEventListener('pointerup', handleStop)
-		// If no drag was started, this was just a click (do nothing)
-	}
-	
-	document.addEventListener('pointermove', handleMove)
-	document.addEventListener('pointerup', handleStop)
 }
 
 function setCursor(cursor: string, barElement?: Element | null) {
@@ -418,6 +486,7 @@ function clearCursor(barElement?: Element | null) {
 }
 
 function startDrag(bar: GanttBarModel, event: PointerEvent) {
+	// Now that drag is confirmed, prevent default to stop scrolling
 	event.preventDefault()
 
 	// Don't allow dragging overdue clamped bars
@@ -439,7 +508,11 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	const barElement = barGroup?.querySelector('.gantt-bar')
 	setCursor('grabbing', barElement)
 	
+	// Remove held visual if present
+	barGroup?.classList.remove('gantt-bar-held')
+	
 	const handleMove = (e: PointerEvent) => {
+		e.preventDefault() // Prevent scrolling while actively dragging
 		if (!dragState.value || !isDragging.value) return
 		
 		const diff = e.clientX - dragState.value.startX
@@ -457,6 +530,7 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 		}
 		if (dragStopHandler) {
 			document.removeEventListener('pointerup', dragStopHandler)
+			document.removeEventListener('pointercancel', dragStopHandler)
 			dragStopHandler = null
 		}
 		
@@ -481,9 +555,13 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	
 	document.addEventListener('pointermove', handleMove)
 	document.addEventListener('pointerup', handleStop)
+	document.addEventListener('pointercancel', handleStop)
 }
 
 function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEvent) {
+	// Disable resize on touch — handles are hidden but just in case
+	if (isTouchEvent(event)) return
+
 	event.preventDefault()
 	event.stopPropagation() // Prevent drag from triggering
 	
@@ -630,6 +708,14 @@ onUnmounted(() => {
 	-webkit-touch-callout: none;
 	-webkit-user-select: none;
 	user-select: none;
+	touch-action: pan-x pan-y;
+}
+
+// Visual feedback when touch-hold is confirmed
+:deep(.gantt-bar-held .gantt-bar) {
+	filter: brightness(1.2);
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
 }
 
 .gantt-chart-wrapper {

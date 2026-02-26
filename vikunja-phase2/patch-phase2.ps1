@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 $ROOT = $PSScriptRoot | Split-Path -Parent
 $PATCH = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$stepTotal = 23
-if ($Deploy) { $stepTotal = 24 }
+$stepTotal = 22
+if ($Deploy) { $stepTotal = 23 }
 $step = 0
 
 function Step($msg) {
@@ -167,10 +167,6 @@ Copy-Item "$PATCH\Home.vue" "$ROOT\frontend\src\views\Home.vue" -Force
 Step "Task row: title left, project right, auto-gen indicator"
 Copy-Item "$PATCH\SingleTaskInProject.vue" "$ROOT\frontend\src\components\tasks\partials\SingleTaskInProject.vue" -Force
 
-Step "Auto-gen bolt indicator: table + kanban views"
-Copy-Item "$PATCH\ProjectTable.vue" "$ROOT\frontend\src\components\project\views\ProjectTable.vue" -Force
-Copy-Item "$PATCH\KanbanCard.vue"   "$ROOT\frontend\src\components\tasks\partials\KanbanCard.vue" -Force
-
 # ===========================
 #  FRONTEND - TODO Fixes (models + types)
 # ===========================
@@ -213,7 +209,7 @@ Write-Host "  Frontend models      : 2 files (task.ts, ITask.ts - autoTemplateId
 Write-Host "  i18n + misc          : 3 files (en.json+arrow keys, SubprojectFilter, PoweredByLink)" -ForegroundColor Gray
 Write-Host "  Documentation        : 3 files" -ForegroundColor Gray
 Write-Host "  --------------------------------" -ForegroundColor DarkGray
-Write-Host "  TOTAL                : 51 files" -ForegroundColor White
+Write-Host "  TOTAL                : 49 files" -ForegroundColor White
 Write-Host ""
 Write-Host "  TODO completions in this build:" -ForegroundColor Magenta
 Write-Host "    [x] Backend cron goroutine (auto_task_cron.go + init.go)" -ForegroundColor DarkCyan
@@ -264,59 +260,96 @@ if (-not $Deploy) {
     if (Test-Path $configFile) {
         try {
             $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
-            Write-Host "  Loaded saved deploy config from deploy-config.json" -ForegroundColor DarkGray
         } catch {
             $cfg = $null
         }
     }
 
-    # Prompt for details (with defaults from saved config or sensible fallbacks)
-    $defaultHost   = if ($cfg.host)       { $cfg.host }       else { "" }
-    $defaultUser   = if ($cfg.user)       { $cfg.user }       else { "root" }
-    $defaultPort   = if ($cfg.port)       { $cfg.port }       else { "22" }
-    $defaultRemote = if ($cfg.remotePath) { $cfg.remotePath } else { "/tmp" }
-    $defaultKey    = if ($cfg.keyPath)    { $cfg.keyPath }    else { "$env:USERPROFILE\.ssh\id_ed25519" }
+    if ($cfg -and $cfg.host) {
+        # Saved config found — show details and auto-proceed with countdown
+        Write-Host ""
+        Write-Host "--- Deploy Configuration (saved) ---" -ForegroundColor Yellow
+        Write-Host "  Server   : $($cfg.user)@$($cfg.host):$($cfg.port)" -ForegroundColor White
+        Write-Host "  SSH Key  : $($cfg.keyPath)" -ForegroundColor White
+        Write-Host "  Remote   : $($cfg.remotePath)" -ForegroundColor White
+        Write-Host ""
 
-    Write-Host ""
-    Write-Host "--- Deploy Configuration ---" -ForegroundColor Yellow
+        $cancelled = $false
+        for ($i = 5; $i -ge 1; $i--) {
+            Write-Host "`r  Deploying in ${i}s... (press any key to CANCEL)" -NoNewline -ForegroundColor Cyan
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($sw.ElapsedMilliseconds -lt 1000) {
+                if ([Console]::KeyAvailable) {
+                    [Console]::ReadKey($true) | Out-Null
+                    $cancelled = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 50
+            }
+            if ($cancelled) { break }
+        }
+        Write-Host ""
 
-    $sshHost = Read-Host "  Server hostname or IP [$defaultHost]"
-    if ([string]::IsNullOrWhiteSpace($sshHost)) { $sshHost = $defaultHost }
-    if ([string]::IsNullOrWhiteSpace($sshHost)) {
-        Write-Host "  [!] Server hostname is required" -ForegroundColor Red
-        exit 1
+        if ($cancelled) {
+            Write-Host "  Cancelled. Re-run with -Deploy to try again." -ForegroundColor Yellow
+            Write-Host "  To change settings, delete deploy-config.json and re-run." -ForegroundColor Gray
+            exit 0
+        }
+
+        $sshHost      = $cfg.host
+        $sshUser      = $cfg.user
+        $sshPort      = $cfg.port
+        $sshKey       = $cfg.keyPath
+        $remoteFolder = $cfg.remotePath
+
+    } else {
+        # No saved config — prompt for details
+        $defaultHost   = ""
+        $defaultUser   = "root"
+        $defaultPort   = "22"
+        $defaultRemote = "/tmp"
+        $defaultKey    = "$env:USERPROFILE\.ssh\id_ed25519"
+
+        Write-Host ""
+        Write-Host "--- Deploy Configuration ---" -ForegroundColor Yellow
+
+        $sshHost = Read-Host "  Server hostname or IP"
+        if ([string]::IsNullOrWhiteSpace($sshHost)) {
+            Write-Host "  [!] Server hostname is required" -ForegroundColor Red
+            exit 1
+        }
+
+        $sshUser = Read-Host "  SSH username [$defaultUser]"
+        if ([string]::IsNullOrWhiteSpace($sshUser)) { $sshUser = $defaultUser }
+
+        $sshPort = Read-Host "  SSH port [$defaultPort]"
+        if ([string]::IsNullOrWhiteSpace($sshPort)) { $sshPort = $defaultPort }
+
+        $sshKey = Read-Host "  SSH key path [$defaultKey]"
+        if ([string]::IsNullOrWhiteSpace($sshKey)) { $sshKey = $defaultKey }
+
+        $remoteFolder = Read-Host "  Remote folder to SCP tar into [$defaultRemote]"
+        if ([string]::IsNullOrWhiteSpace($remoteFolder)) { $remoteFolder = $defaultRemote }
+
+        # Save for next time
+        $saveConfig = Read-Host "  Save for next time? [Y/n]"
+        if ($saveConfig -ne "n" -and $saveConfig -ne "N") {
+            @{
+                host       = $sshHost
+                user       = $sshUser
+                port       = $sshPort
+                keyPath    = $sshKey
+                remotePath = $remoteFolder
+            } | ConvertTo-Json | Set-Content $configFile -Encoding UTF8
+            Write-Host "  Saved to deploy-config.json" -ForegroundColor DarkGray
+        }
     }
-
-    $sshUser = Read-Host "  SSH username [$defaultUser]"
-    if ([string]::IsNullOrWhiteSpace($sshUser)) { $sshUser = $defaultUser }
-
-    $sshPort = Read-Host "  SSH port [$defaultPort]"
-    if ([string]::IsNullOrWhiteSpace($sshPort)) { $sshPort = $defaultPort }
-
-    $sshKey = Read-Host "  SSH key path [$defaultKey]"
-    if ([string]::IsNullOrWhiteSpace($sshKey)) { $sshKey = $defaultKey }
 
     if (-not (Test-Path $sshKey)) {
         Write-Host "  [!] SSH key not found at $sshKey" -ForegroundColor Red
         Write-Host "  Generate one with: ssh-keygen -t ed25519" -ForegroundColor Yellow
         Write-Host "  Then copy it with: ssh-copy-id -p $sshPort ${sshUser}@${sshHost}" -ForegroundColor Yellow
         exit 1
-    }
-
-    $remoteFolder = Read-Host "  Remote folder to SCP tar into [$defaultRemote]"
-    if ([string]::IsNullOrWhiteSpace($remoteFolder)) { $remoteFolder = $defaultRemote }
-
-    # Ask to save for next time
-    $saveConfig = Read-Host "  Save for next time? [Y/n]"
-    if ($saveConfig -ne "n" -and $saveConfig -ne "N") {
-        @{
-            host       = $sshHost
-            user       = $sshUser
-            port       = $sshPort
-            keyPath    = $sshKey
-            remotePath = $remoteFolder
-        } | ConvertTo-Json | Set-Content $configFile -Encoding UTF8
-        Write-Host "  Saved to deploy-config.json" -ForegroundColor DarkGray
     }
 
     $server     = "${sshUser}@${sshHost}"

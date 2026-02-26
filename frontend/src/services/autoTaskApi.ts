@@ -2,7 +2,7 @@ import {AuthenticatedHTTPFactory} from '@/helpers/fetcher'
 
 export interface IAutoTaskTemplate {
 	id?: number
-	project_id: number
+	project_ids: number[]
 	title: string
 	description: string
 	priority: number
@@ -23,7 +23,7 @@ export interface IAutoTaskTemplate {
 
 export function emptyAutoTaskTemplate(): IAutoTaskTemplate {
 	return {
-		project_id: 0,
+		project_ids: [],
 		title: '',
 		description: '',
 		priority: 0,
@@ -76,10 +76,5 @@ export async function checkAutoTasks(): Promise<{created: any[]}> {
 
 export async function truncateAutoTaskLog(templateId: number, keep: number = 0): Promise<{deleted: number}> {
 	const response = await http.post(`/autotasks/${templateId}/log/truncate?keep=${keep}`, {})
-	return response.data
-}
-
-export async function resetAutoTaskSchedule(templateId: number): Promise<{next_due_at: string, message: string}> {
-	const response = await http.post(`/autotasks/${templateId}/reset`, {})
 	return response.data
 }
