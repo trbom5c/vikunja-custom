@@ -18,26 +18,36 @@
 							:placeholder="$t('project.gantt.range')"
 						/>
 					</FormField>
-					<div
-						v-if="!hasDefaultFilters"
-						class="field"
-					>
-						<label
-							class="label"
-							for="range"
-						>Reset</label>
-						<div class="control">
-							<XButton @click="setDefaultFilters">
-								Reset
-							</XButton>
-						</div>
-					</div>
 					<FancyCheckbox
 						v-model="filters.showTasksWithoutDates"
 						is-block
 					>
 						{{ $t('task.show.noDates') }}
 					</FancyCheckbox>
+					<FancyCheckbox
+						v-model="filters.showDoneTasks"
+						is-block
+					>
+						{{ $t('task.show.completed') }}
+					</FancyCheckbox>
+					<SubprojectFilter
+						:project-id="filters.projectId"
+						:show-legend="true"
+						@update:includeSubprojects="onSubprojectToggle"
+						@update:excludeProjectIds="onExcludeChange"
+						@update:colorMap="onColorMapChange"
+					/>
+					<GanttArrowSettings />
+					<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
+					<XButton
+						v-if="canUndo"
+						variant="tertiary"
+						icon="undo"
+						class="gantt-undo-btn"
+						@click="undoLastAction"
+					>
+						Undo
+					</XButton>
 				</div>
 			</Card>
 
@@ -48,21 +58,57 @@
 					class="has-overflow"
 				>
 					<GanttChart
+						ref="ganttChartRef"
 						:filters="filters"
 						:tasks="tasks"
 						:is-loading="isLoading"
 						:default-task-start-date="defaultTaskStartDate"
 						:default-task-end-date="defaultTaskEndDate"
+						:subproject-color-map="subprojectColorMap"
+						:cascade-previews="cascadePreviews"
 						@update:task="updateTask"
 					/>
-					<TaskForm
-						v-if="canWrite"
-						@createTask="addGanttTask"
-					/>
+					<div class="gantt-bottom-bar">
+						<TaskForm
+							v-if="canWrite"
+							@createTask="addGanttTask"
+						/>
+						<XButton
+							v-if="canWrite"
+							variant="primary"
+							icon="layer-group"
+							class="gantt-action-btn"
+							@click="showCreateFromTemplateModal = true"
+						>
+							{{ $t('task.template.fromTemplate') }}
+						</XButton>
+						<XButton
+							v-if="canWrite"
+							variant="primary"
+							icon="link"
+							class="gantt-action-btn"
+							@click="showCreateFromChainModal = true"
+						>
+							{{ $t('task.chain.createFromChain') }}
+						</XButton>
+					</div>
 				</Card>
 			</div>
 		</template>
 	</ProjectWrapper>
+
+	<CreateFromTemplateModal
+		:enabled="showCreateFromTemplateModal"
+		:default-project-id="filters.projectId"
+		@close="showCreateFromTemplateModal = false"
+		@created="onTaskCreatedFromTemplate"
+	/>
+	<CreateFromChainModal
+		:enabled="showCreateFromChainModal"
+		:project-id="filters.projectId"
+		@close="showCreateFromChainModal = false"
+		@created="loadTasks()"
+	/>
 </template>
 
 <script setup lang="ts">
@@ -81,6 +127,10 @@ import TaskForm from '@/components/tasks/TaskForm.vue'
 import FormField from '@/components/input/FormField.vue'
 
 import GanttChart from '@/components/gantt/GanttChart.vue'
+import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
+import GanttArrowSettings from '@/components/gantt/GanttArrowSettings.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import {useGanttFilters} from '../../../views/project/helpers/useGanttFilters'
 import {PERMISSIONS} from '@/constants/permissions'
 
@@ -101,15 +151,72 @@ const baseStore = useBaseStore()
 const canWrite = computed(() => baseStore.currentProject?.maxPermission > PERMISSIONS.READ)
 
 const {route, viewId} = toRefs(props)
+
+const subprojectParams = ref<Record<string, unknown>>({})
+const subprojectColorMap = ref<Map<number, string>>(new Map())
+const showCreateFromTemplateModal = ref(false)
+const showCreateFromChainModal = ref(false)
+
+function onSubprojectToggle(enabled: boolean) {
+	if (enabled) {
+		subprojectParams.value = {...subprojectParams.value, include_subprojects: true}
+	} else {
+		const {include_subprojects, exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+	loadTasks()
+}
+
+function onExcludeChange(ids: string) {
+	if (ids) {
+		subprojectParams.value = {...subprojectParams.value, exclude_project_ids: ids}
+	} else {
+		const {exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+	loadTasks()
+}
+
+function onColorMapChange(map: Map<number, string>) {
+	subprojectColorMap.value = map
+}
+
+function onTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === filters.value.projectId) {
+		loadTasks()
+	}
+}
+
 const {
 	filters,
-	hasDefaultFilters,
-	setDefaultFilters,
 	tasks,
 	isLoading,
 	addTask,
 	updateTask,
-} = useGanttFilters(route, viewId)
+	loadTasks,
+	canUndo,
+	undoLastAction,
+	cascadePreviews,
+	onCascadePrompt,
+	onCascadeClose,
+} = useGanttFilters(route, viewId, subprojectParams)
+
+// Ref to GanttChart for cascade bubble
+const ganttChartRef = ref<InstanceType<typeof GanttChart> | null>(null)
+
+// Wire cascade prompts to the bubble in GanttChart
+onCascadePrompt.value = (info) => {
+	if (ganttChartRef.value?.showCascadeInBubble) {
+		ganttChartRef.value.showCascadeInBubble(info)
+	}
+}
+
+// Wire cascade close to dismiss the bubble
+onCascadeClose.value = () => {
+	if (ganttChartRef.value?.closeCascadeBubble) {
+		ganttChartRef.value.closeCascadeBubble()
+	}
+}
 
 const DEFAULT_DATE_RANGE_DAYS = 7
 
@@ -164,6 +271,31 @@ const flatPickerConfig = computed(() => ({
 	padding-block-end: 1rem;
 }
 
+.gantt-bottom-bar {
+	display: flex;
+	align-items: center;
+	gap: .5rem;
+	padding: .5rem;
+	flex-wrap: wrap;
+
+	:deep(.add-new-task) {
+		padding: 0;
+		margin: 0;
+
+		.button {
+			font-size: .8rem;
+			padding-block: .4rem;
+			padding-inline: .75rem;
+		}
+	}
+}
+
+.gantt-action-btn {
+	font-size: .8rem;
+	padding-block: .4rem;
+	padding-inline: .75rem;
+}
+
 .gantt-options {
 	display: flex;
 	justify-content: space-between;
@@ -213,5 +345,17 @@ const flatPickerConfig = computed(() => ({
 	.label {
 		font-size: .9rem;
 	}
+}
+
+.gantt-undo-btn {
+	white-space: nowrap;
+}
+
+.gantt-zoom-hint {
+	font-size: 0.65rem;
+	color: var(--grey-500, #888);
+	white-space: nowrap;
+	user-select: none;
+	margin-inline-start: auto;
 }
 </style>
