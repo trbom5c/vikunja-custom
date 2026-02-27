@@ -77,6 +77,20 @@ function saveConfig(config: GanttArrowConfig) {
 // Singleton reactive config
 const arrowConfig = reactive<GanttArrowConfig>(loadConfig())
 
+// Re-hydrate once preferences are loaded from API (loadConfig may have run before init)
+const {loaded: prefsLoaded} = useUserPreferences()
+watch(prefsLoaded, (isLoaded) => {
+	if (isLoaded) {
+		const fresh = loadConfig()
+		// Only apply if different from defaults (i.e. server had stored config)
+		const freshJson = JSON.stringify(fresh)
+		const currentJson = JSON.stringify(arrowConfig)
+		if (freshJson !== currentJson) {
+			Object.assign(arrowConfig, fresh)
+		}
+	}
+}, {immediate: true})
+
 // Auto-save on any change
 watch(arrowConfig, (val) => {
 	saveConfig(val)
