@@ -1,24 +1,32 @@
 <template>
 	<Notifications
 		position="bottom left"
-		:max="2"
+		:max="5"
 		:ignore-duplicates="true"
 		class="global-notification"
 	>
 		<template #body="{ item, close }">
-			<!-- FIXME: overlay whole notification with button and add event listener on that button instead -->
 			<div
 				class="vue-notification-template vue-notification"
 				:class="[
 					item.type,
+					{ 'is-sticky': item.data?.sticky },
 				]"
-				@click="close()"
+				:style="item.data?.accentColor ? { borderLeftColor: item.data.accentColor, borderLeftWidth: '5px' } : {}"
+				@click="!item.data?.sticky && close()"
 			>
-				<div
-					v-if="item.title"
-					class="notification-title"
-				>
-					{{ item.title }}
+				<div class="notification-header">
+					<div
+						v-if="item.title"
+						class="notification-title"
+					>
+						{{ item.title }}
+					</div>
+					<div
+						v-if="item.data?.accentColor"
+						class="accent-dot"
+						:style="{ background: item.data.accentColor }"
+					/>
 				</div>
 				<div class="notification-content">
 					<template v-if="Array.isArray(item.text)">
@@ -41,15 +49,16 @@
 				</div>
 				<div
 					v-if="item.data?.actions?.length > 0"
-					class="tw-flex tw-justify-end tw-gap-2"
+					class="notification-actions"
 				>
 					<XButton
 						v-for="(action, i) in item.data.actions"
 						:key="'action_' + i"
 						:shadow="false"
 						class="is-small"
-						variant="secondary"
-						@click="action.callback"
+						:variant="action.title === 'Dismiss' ? 'tertiary' : 'secondary'"
+						:class="{ 'dismiss-btn': action.title === 'Dismiss' }"
+						@click="action.callback(); close()"
 					>
 						{{ action.title }}
 					</XButton>
@@ -64,7 +73,61 @@
 	z-index: 9999;
 }
 
-.tw-flex {
+.vue-notification.warning {
+	background: #f0ad4e;
+	border-left-color: #d48b0c;
+	color: #1a1a1a;
+}
+
+.vue-notification.warning .notification-title {
+	color: #1a1a1a;
+	font-weight: 600;
+}
+
+.vue-notification.warning .notification-content {
+	color: #2a2a2a;
+}
+
+.vue-notification.is-sticky {
+	animation: toast-pulse 2s ease-in-out 3;
+	cursor: default;
+}
+
+@keyframes toast-pulse {
+	0%, 100% {
+		transform: scale(1);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	}
+	50% {
+		transform: scale(1.02);
+		box-shadow: 0 4px 16px rgba(240, 173, 78, 0.4);
+	}
+}
+
+.notification-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.accent-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.notification-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
 	margin-block-start: 0.5rem;
+}
+
+.dismiss-btn {
+	opacity: 0.7;
+}
+.dismiss-btn:hover {
+	opacity: 1;
 }
 </style>
