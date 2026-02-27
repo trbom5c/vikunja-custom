@@ -16,6 +16,20 @@
 				>
 				{{ name }}
 			</RouterLink>
+			<RouterLink
+				class="migration-service-link"
+				:to="{name: 'import.trello-json'}"
+			>
+				<div class="migration-service-image trello-json-icon">
+					<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<rect width="48" height="48" rx="8" fill="#0079BF"/>
+						<rect x="8" y="8" width="13" height="28" rx="2" fill="white"/>
+						<rect x="27" y="8" width="13" height="18" rx="2" fill="white"/>
+						<text x="24" y="44" font-size="6" fill="white" text-anchor="middle" font-weight="bold">JSON</text>
+					</svg>
+				</div>
+				Trello JSON
+			</RouterLink>
 		</div>
 	</div>
 </template>
@@ -53,5 +67,12 @@ const availableMigrators = computed(() => configStore.availableMigrators
 
 .migration-service-image {
 	display: block;
+}
+
+.trello-json-icon {
+	svg {
+		width: 100%;
+		height: auto;
+	}
 }
 </style>
