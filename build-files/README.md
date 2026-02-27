@@ -1,6 +1,6 @@
 # Vikunja Custom Build
 
-Automated build pipeline for a heavily customized [Vikunja](https://vikunja.io) Docker image. Clones upstream, patches ~90 source files across Go backend and Vue/TypeScript frontend, builds a single Docker image, and optionally pushes to GitHub and deploys to production.
+Automated build pipeline for a heavily customized [Vikunja](https://vikunja.io) Docker image. Clones upstream, patches ~95 source files across Go backend and Vue/TypeScript frontend, builds a single Docker image, and optionally pushes to GitHub and deploys to production.
 
 ## What's Different
 
@@ -19,6 +19,29 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 - **Subproject color coding** — each subproject gets a distinct color on bars and legend dots in the toolbar
 - **Arrow settings panel** — gear icon opens a comprehensive config panel for all arrow visual properties
 - **Compact toolbar** — refactored options bar: date picker + checkboxes on left, subproject filter + settings on right
+- **Overdue task bars** — striped pattern with red border, left-arrow indicator, pulsing animation, and overdue duration text (e.g., "3mo overdue")
+- **Hover tooltips** — all bars show `[Project Name] Task Title — date range` on hover; overdue bars show original date range on second line
+
+### Table View (Modernized)
+
+- **Multi-column sorting** — click to sort, Ctrl+click to add columns. Cycle: desc → asc → remove
+- **Sort indicator bar** — shows active sort columns as removable chips with priority numbers
+- **Sortable Project column** — sorts by `project_id` on the backend
+- **Sticky headers** — stay visible when scrolling long tables
+- **Row styling** — alternating row backgrounds, hover highlight, done tasks dimmed to 55%
+- **Project color accent** — left border on project names using the project's hex color
+- **Percent done bar** — visual progress bar instead of plain percentage text
+- **Row count footer** — "460 tasks · page 1 of 24"
+- **Monospace IDs** — cleaner styling for task identifiers
+- **Uppercase headers** — modern data-grid styling with letter-spacing
+
+### Trello JSON Import
+
+- **Client-side importer** — upload a Trello board `.json` export to import lists as sub-projects with all cards, labels, descriptions, checklists, due dates, and assignments
+- **Reliable date handling** — bypasses the TaskModel pipeline (which silently drops dates) using raw `fetch()` with snake_case fields
+- **Smart date mapping** — both start+due → full gantt range; start only → single-day bar; due only → endOnly bar with fade-in effect
+- **Import statistics** — completion screen shows projects, tasks, labels, and dates-set counts
+- **Import log** — scrollable output showing each operation
 
 ### Task Templates & Workflows
 
@@ -46,6 +69,7 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 
 ### UI Polish
 
+- **Project delete indicator** — loading spinner with task/project count during deletion, buttons hidden while in progress
 - **Consistent page layouts** — Labels, Teams, Projects, Upcoming, Templates pages all use `content-widescreen` pattern
 - **Home page** — current tasks above last-viewed projects; auto-task check on mount
 - **Upcoming page** — filter bar with checkbox persistence, assigned-to-me filter
@@ -58,7 +82,7 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 ┌─────────────────────────────────────┐
 │         vikunja-build.ps1           │  ← Orchestrator
 ├─────────────────────────────────────┤
-│  build-files/  (~90 files)          │  ← Patch layer
+│  build-files/  (~95 files)          │  ← Patch layer
 │  ├── Go models, handlers, migrations│
 │  ├── Vue components & views         │
 │  ├── TypeScript composables & APIs  │
@@ -90,8 +114,8 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 # Full pipeline: build, push, release, deploy
 .\vikunja-build.ps1 -Release -Deploy -CommitMsg "feat: description"
 
-# Import updated files
-.\vikunja-build.ps1 -Import "C:\Downloads\update-files"
+# Release with 'latest' tag on all repos
+.\vikunja-build.ps1 -Release -Deploy -TagLatest -CommitMsg "feat: description"
 
 # Fast iteration (reuse cloned source)
 .\vikunja-build.ps1 -SkipClone -Deploy
@@ -106,8 +130,8 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 | `-Push` | Push to fork (implies `-Commit`) |
 | `-Release` | GitHub release with tar (implies `-Commit -Push`) |
 | `-Deploy` | SCP tar to server + docker load + restart |
+| `-TagLatest` | Push `latest` git tag to all repos (implies `-Release`) |
 | `-CommitMsg "msg"` | Custom commit message (implies `-Commit`) |
-| `-Import "path"` | Copy files into `build-files/` and exit |
 | `-NoBuild` | Skip Docker build — use existing tar |
 | `-Force` | Rebuild even if no files changed |
 | `-SkipClone` | Reuse existing `vikunja-src/` |
@@ -122,12 +146,13 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
  [1] Check downloads/ for update zip
  [2] Verify build-files/
  [3] Clone fresh from upstream
- [4] Patch source (~90 files into clone)
+ [4] Patch source (~95 files into clone)
  [5] Auto-fix upstream compat
  [6] Change detection (SHA256 hash)
  [7] Docker build (multi-stage)
  [8] Save tar + timestamped backup
  [9] Git push + GitHub releases (all configured repos)
+      └── Optional: push 'latest' tag (-TagLatest)
 [10] Deploy via SSH
 ```
 
@@ -168,7 +193,7 @@ This fork adds significant functionality on top of upstream Vikunja — all appl
 ```
 vikunja-custom-build/
 ├── vikunja-build.ps1              ← Build orchestrator
-├── build-files/                   ← Patch files (~90)
+├── build-files/                   ← Patch files (~95)
 │   ├── *.go                       ← Models, handlers, migrations
 │   ├── *.vue                      ← Components and views
 │   ├── *.ts                       ← Services, composables, stores
