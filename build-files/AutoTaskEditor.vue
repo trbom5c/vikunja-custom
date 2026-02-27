@@ -558,7 +558,7 @@ import Editor from '@/components/input/AsyncEditor'
 import type {IProject} from '@/modelTypes/IProject'
 import type {ILabel} from '@/modelTypes/ILabel'
 
-import {success, error} from '@/message'
+import {success, error, warning} from '@/message'
 import {useProjectStore} from '@/stores/projects'
 import {useLabelStore} from '@/stores/labels'
 import {formatDateLong} from '@/helpers/time/formatDate'
@@ -832,8 +832,9 @@ async function triggerNow(tmpl: IAutoTaskTemplate) {
 		success({message: t('task.autoTask.triggeredSuccess')})
 		await loadTemplates()
 	} catch (e: any) {
-		if (e?.response?.data?.message || e?.message) {
-			success({message: e?.response?.data?.message || e.message})
+		const msg = e?.response?.data?.message || e?.message
+		if (msg) {
+			warning(msg)
 		}
 	}
 }
