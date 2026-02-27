@@ -91,6 +91,7 @@ func FullInitWithoutAsync() {
 	// Set Engine
 	InitEngines()
 
+
 	// Start the mail daemon
 	mail.StartMailDaemon()
 
@@ -123,10 +124,10 @@ func FullInit() {
 	models.RegisterOldExportCleanupCron()
 	models.RegisterAddTaskToFilterViewCron()
 	user.RegisterTokenCleanupCron()
-	models.RegisterSessionCleanupCron()
 	user.RegisterDeletionNotificationCron()
 	openid.CleanupSavedOpenIDProviders()
 	openid.RegisterEmptyOpenIDTeamCleanupCron()
+	models.RegisterAutoTaskCron()
 
 	// Start processing events
 	go func() {

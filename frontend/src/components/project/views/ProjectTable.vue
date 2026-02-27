@@ -81,6 +81,31 @@
 					:project-id="projectId"
 					@update:modelValue="taskList.loadTasks()"
 				/>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="layer-group"
+					:shadow="false"
+					class="mis-2"
+					@click="showCreateFromTemplateModal = true"
+				>
+					{{ $t('task.template.fromTemplate') }}
+				</XButton>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="link"
+					:shadow="false"
+					class="mis-2"
+					@click="showCreateFromChainModal = true"
+				>
+					{{ $t('task.chain.createFromChain') }}
+				</XButton>
+				<SubprojectFilter
+					:project-id="projectId"
+					@update:includeSubprojects="onSubprojectToggle"
+					@update:excludeProjectIds="onExcludeChange"
+				/>
 			</div>
 		</template>
 
@@ -223,6 +248,12 @@
 									<td v-if="activeColumns.title">
 										<TaskGlanceTooltip :task="t">
 											<RouterLink :to="taskDetailRoutes[t.id]">
+												<Icon
+													v-if="t.autoTemplateId > 0"
+													icon="bolt"
+													v-tooltip="$t('task.autoTask.autoGenIndicator')"
+													class="auto-gen-indicator"
+												/>
 												{{ t.title }}
 											</RouterLink>
 										</TaskGlanceTooltip>
@@ -296,10 +327,23 @@
 			</div>
 		</template>
 	</ProjectWrapper>
+
+	<CreateFromTemplateModal
+		:enabled="showCreateFromTemplateModal"
+		:default-project-id="projectId"
+		@close="showCreateFromTemplateModal = false"
+		@created="handleTaskCreatedFromTemplate"
+	/>
+	<CreateFromChainModal
+		:enabled="showCreateFromChainModal"
+		:project-id="projectId"
+		@close="showCreateFromChainModal = false"
+		@created="loadTasks(1)"
+	/>
 </template>
 
 <script setup lang="ts">
-import {computed, type Ref, watch} from 'vue'
+import {computed, ref, type Ref, watch} from 'vue'
 
 import {useStorage} from '@vueuse/core'
 
@@ -314,6 +358,9 @@ import CommentCount from '@/components/tasks/partials/CommentCount.vue'
 import FancyCheckbox from '@/components/input/FancyCheckbox.vue'
 import Sort from '@/components/tasks/partials/Sort.vue'
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
+import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import Pagination from '@/components/misc/Pagination.vue'
 import Popup from '@/components/misc/Popup.vue'
 
@@ -335,10 +382,33 @@ const props = defineProps<{
 
 const projectStore = useProjectStore()
 
+const showCreateFromTemplateModal = ref(false)
+const showCreateFromChainModal = ref(false)
+
+const subprojectParams = ref<Record<string, unknown>>({})
+
+function onSubprojectToggle(enabled: boolean) {
+	if (enabled) {
+		subprojectParams.value = {...subprojectParams.value, include_subprojects: true}
+	} else {
+		const {include_subprojects, exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+}
+
+function onExcludeChange(ids: string) {
+	if (ids) {
+		subprojectParams.value = {...subprojectParams.value, exclude_project_ids: ids}
+	} else {
+		const {exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+}
+
 const ACTIVE_COLUMNS_DEFAULT = {
 	index: true,
 	done: true,
-	project: false,
+	project: true,
 	title: true,
 	priority: false,
 	labels: true,
@@ -366,6 +436,7 @@ const taskList = useTaskList(
 	() => props.viewId, 
 	sortBy.value,
 	() => ['comment_count', 'is_unread'],
+	() => subprojectParams.value,
 )
 
 const {
@@ -382,6 +453,12 @@ watch(
 	() => setActiveColumnsSortParam(),
 	{deep: true},
 )
+
+function handleTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === props.projectId) {
+		taskList.loadTasks()
+	}
+}
 
 // Allow sorting by multiple columns only when ctrl is pressed
 function sort(property: keyof SortBy, event?: MouseEvent) {
@@ -466,5 +543,11 @@ const taskDetailRoutes = computed(() => Object.fromEntries(
 
 .filter-container :deep(.popup) {
 	inset-block-start: 7rem;
+}
+
+.auto-gen-indicator {
+	color: var(--warning);
+	font-size: .75rem;
+	margin-inline-end: .25rem;
 }
 </style>
