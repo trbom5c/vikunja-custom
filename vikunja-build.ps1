@@ -464,6 +464,9 @@ $fileMap = @{
     "ShowTasks.vue"              = "frontend\src\views\tasks\ShowTasks.vue"
     "TaskDetailView.vue"         = "frontend\src\views\tasks\TaskDetailView.vue"
     "Home.vue"                   = "frontend\src\views\Home.vue"
+    # Frontend - Trello Import
+    "TrelloImport.vue"           = "frontend\src\views\migrate\TrelloImport.vue"
+    "Migration.vue"              = "frontend\src\views\migrate\Migration.vue"
     # Frontend - i18n + Misc
     "en.json"                    = "frontend\src\i18n\lang\en.json"
     "PoweredByLink.vue"          = "frontend\src\components\home\PoweredByLink.vue"

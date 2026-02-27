@@ -158,6 +158,11 @@ const router = createRouter({
 						code: route.query.code as string,
 					}),
 				},
+				{
+					path: '/import/trello-json',
+					name: 'import.trello-json',
+					component: () => import('@/views/migrate/TrelloImport.vue'),
+				},
 			],
 		},
 		{
