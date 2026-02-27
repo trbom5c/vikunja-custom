@@ -252,9 +252,6 @@ function cancelDrag() {
 		dragState.value = null
 	}
 }
-		dragState.value = null
-	}
-}
 
 // Wire cascade prompt callback — transitions the drag bubble to cascade phase
 if (props.onCascadePrompt) {
