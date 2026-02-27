@@ -28,12 +28,13 @@ ARG TARGETOS TARGETARCH TARGETVARIANT RELEASE_VERSION
 ENV RELEASE_VERSION=$RELEASE_VERSION
 
 RUN export PATH=$PATH:$GOPATH/bin && \
+	go mod tidy && \
 	mage build:clean && \
     mage release:xgo "${TARGETOS}/${TARGETARCH}/${TARGETVARIANT}"
 
-#  ┬─┐┬ ┐┌┐┐┌┐┐┬─┐┬─┐
-#  │┬┘│ │││││││├─ │┬┘
-#  ┘└┘┘─┘┘└┘┘└┘┴─┘┘└┘
+#  â”¬â”€â”â”¬ â”â”Œâ”â”â”Œâ”â”â”¬â”€â”â”¬â”€â”
+#  â”‚â”¬â”˜â”‚ â”‚â”‚â”‚â”‚â”‚â”‚â”‚â”œâ”€ â”‚â”¬â”˜
+#  â”˜â””â”˜â”˜â”€â”˜â”˜â””â”˜â”˜â””â”˜â”´â”€â”˜â”˜â””â”˜
 
 # The actual image
 FROM scratch

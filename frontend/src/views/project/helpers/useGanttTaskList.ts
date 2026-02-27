@@ -390,7 +390,6 @@ export function useGanttTaskList<F extends Filters>(
 						callback: () => clearCascadePreview(succPreviewId),
 					}], {accentColor: succColor, label: `↓ ${successors!.length} Downstream`})
 				}
-				}
 			}
 		} catch (e) {
 			console.error('Failed to check cascade:', e)
