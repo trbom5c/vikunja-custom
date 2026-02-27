@@ -439,6 +439,70 @@ async function createTaskRaw(projectId: number, payload: Record<string, any>): P
 	return response.json()
 }
 
+// ─────────────────────────────────────────────────────────────
+// Kanban bucket helpers
+//
+// Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When
+// a project is created it auto-creates views including a Kanban
+// view with default buckets (To-Do, Doing, Done).  To make
+// imported tasks appear on the Kanban board we must:
+//   1. Find the project's Kanban view
+//   2. Get the first (default) bucket in that view
+//   3. Assign each created task to that bucket
+//
+// Without this step, tasks exist but have no bucket assignment
+// and are invisible on the Kanban board.
+// ─────────────────────────────────────────────────────────────
+
+async function getProjectKanbanViewId(projectId: number): Promise<number | null> {
+	const token = getAuthToken()
+	try {
+		const resp = await fetch(`/api/v1/projects/${projectId}/views`, {
+			headers: { 'Authorization': 'Bearer ' + token },
+		})
+		if (!resp.ok) return null
+		const views: any[] = await resp.json()
+		// Find the Kanban view.  Vikunja uses view_kind === 3 for Kanban.
+		// Check both snake_case and camelCase, plus title fallback.
+		const kanban = views.find((v: any) =>
+			v.view_kind === 3 || v.viewKind === 3 ||
+			(v.title || '').toLowerCase() === 'kanban'
+		)
+		return kanban?.id ?? null
+	} catch {
+		return null
+	}
+}
+
+async function getDefaultBucketId(projectId: number, viewId: number): Promise<number | null> {
+	const token = getAuthToken()
+	try {
+		const resp = await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets`, {
+			headers: { 'Authorization': 'Bearer ' + token },
+		})
+		if (!resp.ok) return null
+		const buckets: any[] = await resp.json()
+		if (buckets.length === 0) return null
+		// Return the first bucket (lowest position = default / "To-Do")
+		buckets.sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+		return buckets[0]?.id ?? null
+	} catch {
+		return null
+	}
+}
+
+async function assignTaskToBucket(projectId: number, viewId: number, bucketId: number, taskId: number): Promise<void> {
+	const token = getAuthToken()
+	await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets/${bucketId}/tasks`, {
+		method: 'POST',
+		headers: {
+			'Authorization': 'Bearer ' + token,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ task_id: taskId }),
+	})
+}
+
 // ── Import Logic ──
 async function startImport() {
 	isImporting.value = true
@@ -548,6 +612,33 @@ async function startImport() {
 			// All lists go into parent project
 			for (const list of selectedLists) {
 				listProjectMap.set(list.id, parentProject.id)
+			}
+		}
+
+		// ─────────────────────────────────────────────────────
+		// PHASE 3.5: Discover Kanban views + default buckets
+		//
+		// For each project we created, find its Kanban view ID
+		// and the default bucket ID so we can assign tasks to
+		// the bucket during import.  Without this, tasks won't
+		// appear on the Kanban board.
+		// ─────────────────────────────────────────────────────
+		const projectKanbanInfo = new Map<number, { viewId: number; bucketId: number }>()
+
+		// Gather all unique project IDs we'll be importing into
+		const allProjectIds = new Set<number>([parentProject.id])
+		for (const pid of listProjectMap.values()) {
+			allProjectIds.add(pid)
+		}
+
+		for (const pid of allProjectIds) {
+			const kanbanViewId = await getProjectKanbanViewId(pid)
+			if (kanbanViewId) {
+				const bucketId = await getDefaultBucketId(pid, kanbanViewId)
+				if (bucketId) {
+					projectKanbanInfo.set(pid, { viewId: kanbanViewId, bucketId })
+					log('info', `Kanban ready for project ${pid} (view=${kanbanViewId}, bucket=${bucketId})`)
+				}
 			}
 		}
 
@@ -663,6 +754,17 @@ async function startImport() {
 
 				// ── Create the task via raw fetch ──
 				const task = await createTaskRaw(projectId, payload)
+
+				// ── Assign task to Kanban bucket ──
+				// This makes the task appear on the Kanban board.
+				const kanbanInfo = projectKanbanInfo.get(projectId)
+				if (kanbanInfo && task.id) {
+					try {
+						await assignTaskToBucket(projectId, kanbanInfo.viewId, kanbanInfo.bucketId, task.id)
+					} catch {
+						// Non-fatal: task exists but won't show on Kanban
+					}
+				}
 
 				// Track date stats
 				if (hasAnyDate) {
