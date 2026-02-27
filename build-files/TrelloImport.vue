@@ -61,6 +61,33 @@
 					<span class="option-desc">If unchecked, lists become views within a single project</span>
 				</div>
 
+				<div class="option-group">
+					<h4 class="option-group-title">Kanban Board Layout</h4>
+					<div class="radio-options">
+						<label class="radio-option" :class="{ 'is-selected': options.kanbanMode === 'simple' }">
+							<input v-model="options.kanbanMode" type="radio" value="simple" name="kanbanMode">
+							<div class="radio-content">
+								<span class="radio-title">Simple (To-Do / Done)</span>
+								<span class="radio-desc">Unfinished tasks go to "To-Do", completed tasks go to "Done" using default Kanban buckets</span>
+							</div>
+						</label>
+						<label class="radio-option" :class="{ 'is-selected': options.kanbanMode === 'replicate' }">
+							<input v-model="options.kanbanMode" type="radio" value="replicate" name="kanbanMode">
+							<div class="radio-content">
+								<span class="radio-title">Replicate Trello Board</span>
+								<span class="radio-desc">Create Kanban columns matching your Trello lists on the parent project — cards placed in their original list's column</span>
+							</div>
+						</label>
+						<label class="radio-option" :class="{ 'is-selected': options.kanbanMode === 'none' }">
+							<input v-model="options.kanbanMode" type="radio" value="none" name="kanbanMode">
+							<div class="radio-content">
+								<span class="radio-title">Skip Kanban setup</span>
+								<span class="radio-desc">Don't assign tasks to Kanban buckets (tasks visible in List, Table, Gantt only)</span>
+							</div>
+						</label>
+					</div>
+				</div>
+
 				<div class="option-row">
 					<label class="option-label">
 						<input v-model="options.importArchived" type="checkbox">
@@ -187,6 +214,14 @@
 					<strong>{{ importStats.datesSet }}</strong>
 					<span>with dates</span>
 				</div>
+				<div class="complete-stat" v-if="importStats.doneCount > 0">
+					<strong>{{ importStats.doneCount }}</strong>
+					<span>marked done</span>
+				</div>
+				<div class="complete-stat" v-if="importStats.buckets > 0">
+					<strong>{{ importStats.buckets }}</strong>
+					<span>kanban {{ importStats.buckets === 1 ? 'column' : 'columns' }}</span>
+				</div>
 			</div>
 			<div v-if="importStats.errors > 0" class="complete-errors">
 				<Message variant="warning">
@@ -263,12 +298,13 @@ const createdProjectId = ref<number>(0)
 const progressPercent = ref(0)
 const progressText = ref('')
 const importLog = ref<Array<{type: string, message: string}>>([])
-const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 })
+const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 })
 
 // ── Options ──
 const options = ref({
 	projectName: '',
 	listsAsSubProjects: true,
+	kanbanMode: 'simple' as 'simple' | 'replicate' | 'none',
 	importArchived: false,
 	importClosedLists: false,
 	importChecklists: true,
@@ -366,7 +402,7 @@ function resetImport() {
 	isImporting.value = false
 	importComplete.value = false
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 }
 	progressPercent.value = 0
 	progressText.value = ''
 	parseError.value = ''
@@ -444,15 +480,21 @@ async function createTaskRaw(projectId: number, payload: Record<string, any>): P
 //
 // Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When
 // a project is created it auto-creates views including a Kanban
-// view with default buckets (To-Do, Doing, Done).  To make
-// imported tasks appear on the Kanban board we must:
-//   1. Find the project's Kanban view
-//   2. Get the first (default) bucket in that view
-//   3. Assign each created task to that bucket
+// view with default buckets (To-Do, Doing, Done).
 //
-// Without this step, tasks exist but have no bucket assignment
-// and are invisible on the Kanban board.
+// Three modes:
+//   'simple'    → assign unfinished→To-Do, done→Done
+//   'replicate' → create buckets matching Trello lists on the
+//                  parent project's Kanban, assign cards to their
+//                  original list's bucket
+//   'none'      → skip bucket assignment entirely
 // ─────────────────────────────────────────────────────────────
+
+interface BucketInfo {
+	id: number
+	title: string
+	position: number
+}
 
 async function getProjectKanbanViewId(projectId: number): Promise<number | null> {
 	const token = getAuthToken()
@@ -474,26 +516,61 @@ async function getProjectKanbanViewId(projectId: number): Promise<number | null>
 	}
 }
 
-async function getDefaultBucketId(projectId: number, viewId: number): Promise<number | null> {
+async function getBucketsByView(projectId: number, viewId: number): Promise<BucketInfo[]> {
 	const token = getAuthToken()
 	try {
 		const resp = await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets`, {
 			headers: { 'Authorization': 'Bearer ' + token },
 		})
-		if (!resp.ok) return null
+		if (!resp.ok) return []
 		const buckets: any[] = await resp.json()
-		if (buckets.length === 0) return null
-		// Return the first bucket (lowest position = default / "To-Do")
-		buckets.sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-		return buckets[0]?.id ?? null
+		return buckets
+			.map((b: any) => ({ id: b.id, title: b.title || '', position: b.position || 0 }))
+			.sort((a, b) => a.position - b.position)
 	} catch {
+		return []
+	}
+}
+
+async function createBucketRaw(projectId: number, viewId: number, title: string, position: number): Promise<number | null> {
+	const token = getAuthToken()
+	try {
+		const resp = await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets`, {
+			method: 'PUT',
+			headers: {
+				'Authorization': 'Bearer ' + token,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({ title, position }),
+		})
+		if (!resp.ok) {
+			const errBody = await resp.text()
+			console.error(`createBucket failed: HTTP ${resp.status}`, errBody)
+			return null
+		}
+		const bucket = await resp.json()
+		return bucket?.id ?? null
+	} catch (e) {
+		console.error('createBucket exception:', e)
 		return null
+	}
+}
+
+async function deleteBucketRaw(projectId: number, viewId: number, bucketId: number): Promise<void> {
+	const token = getAuthToken()
+	try {
+		await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets/${bucketId}`, {
+			method: 'DELETE',
+			headers: { 'Authorization': 'Bearer ' + token },
+		})
+	} catch {
+		// non-fatal
 	}
 }
 
 async function assignTaskToBucket(projectId: number, viewId: number, bucketId: number, taskId: number): Promise<void> {
 	const token = getAuthToken()
-	await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets/${bucketId}/tasks`, {
+	const resp = await fetch(`/api/v1/projects/${projectId}/views/${viewId}/buckets/${bucketId}/tasks`, {
 		method: 'POST',
 		headers: {
 			'Authorization': 'Bearer ' + token,
@@ -501,13 +578,17 @@ async function assignTaskToBucket(projectId: number, viewId: number, bucketId: n
 		},
 		body: JSON.stringify({ task_id: taskId }),
 	})
+	if (!resp.ok) {
+		const errBody = await resp.text()
+		throw new Error(`Bucket assign HTTP ${resp.status}: ${errBody}`)
+	}
 }
 
 // ── Import Logic ──
 async function startImport() {
 	isImporting.value = true
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 }
 
 	const projectService = new ProjectService()
 	const labelService = new LabelService()
@@ -616,28 +697,98 @@ async function startImport() {
 		}
 
 		// ─────────────────────────────────────────────────────
-		// PHASE 3.5: Discover Kanban views + default buckets
+		// PHASE 3.5: Set up Kanban buckets
 		//
-		// For each project we created, find its Kanban view ID
-		// and the default bucket ID so we can assign tasks to
-		// the bucket during import.  Without this, tasks won't
-		// appear on the Kanban board.
+		// Three modes controlled by options.kanbanMode:
+		//
+		// 'simple' — For each project (parent + subs), find
+		//   the default To-Do and Done buckets.  Tasks will be
+		//   assigned based on their completion status.
+		//
+		// 'replicate' — On the PARENT project's Kanban view,
+		//   replace the default buckets with one bucket per
+		//   selected Trello list.  Cards are placed into their
+		//   original list's column.  Subproject Kanbans also
+		//   get simple To-Do/Done assignment.
+		//
+		// 'none' — Skip all bucket assignment.
 		// ─────────────────────────────────────────────────────
-		const projectKanbanInfo = new Map<number, { viewId: number; bucketId: number }>()
 
-		// Gather all unique project IDs we'll be importing into
-		const allProjectIds = new Set<number>([parentProject.id])
-		for (const pid of listProjectMap.values()) {
-			allProjectIds.add(pid)
-		}
+		// Maps projectId → { viewId, todoBucketId, doneBucketId }
+		const projectKanbanSimple = new Map<number, { viewId: number; todoBucketId: number; doneBucketId: number }>()
 
-		for (const pid of allProjectIds) {
-			const kanbanViewId = await getProjectKanbanViewId(pid)
-			if (kanbanViewId) {
-				const bucketId = await getDefaultBucketId(pid, kanbanViewId)
-				if (bucketId) {
-					projectKanbanInfo.set(pid, { viewId: kanbanViewId, bucketId })
-					log('info', `Kanban ready for project ${pid} (view=${kanbanViewId}, bucket=${bucketId})`)
+		// Maps trelloListId → bucketId (for 'replicate' mode on parent project)
+		const trelloListBucketMap = new Map<string, number>()
+		let parentKanbanViewId: number | null = null
+
+		if (options.value.kanbanMode !== 'none') {
+			// ── Discover Kanban info for all subprojects (simple assignment) ──
+			const allProjectIds = new Set<number>()
+			for (const pid of listProjectMap.values()) {
+				allProjectIds.add(pid)
+			}
+			// Also add parent if not using replicate (or as fallback)
+			if (options.value.kanbanMode === 'simple') {
+				allProjectIds.add(parentProject.id)
+			}
+
+			for (const pid of allProjectIds) {
+				const kanbanViewId = await getProjectKanbanViewId(pid)
+				if (!kanbanViewId) continue
+				const buckets = await getBucketsByView(pid, kanbanViewId)
+				if (buckets.length === 0) continue
+
+				// Find To-Do bucket (first by position) and Done bucket (last, or by checkmark title)
+				const todoBucket = buckets[0]
+				const doneBucket = buckets.find(b =>
+					b.title.toLowerCase() === 'done'
+				) || buckets[buckets.length - 1]
+
+				projectKanbanSimple.set(pid, {
+					viewId: kanbanViewId,
+					todoBucketId: todoBucket.id,
+					doneBucketId: doneBucket.id,
+				})
+				log('info', `Kanban ready for project ${pid} — To-Do: "${todoBucket.title}", Done: "${doneBucket.title}"`)
+			}
+
+			// ── Replicate mode: set up parent project Kanban ──
+			if (options.value.kanbanMode === 'replicate') {
+				parentKanbanViewId = await getProjectKanbanViewId(parentProject.id)
+				if (parentKanbanViewId) {
+					log('info', 'Setting up Trello-replica Kanban on parent project...')
+
+					// Get existing default buckets so we can remove them after
+					const existingBuckets = await getBucketsByView(parentProject.id, parentKanbanViewId)
+
+					// Create a bucket for each selected Trello list (in original order)
+					const orderedLists = [...selectedLists].sort((a: any, b: any) => (a.pos || 0) - (b.pos || 0))
+					let bucketPos = 100
+
+					for (const list of orderedLists) {
+						updateProgress(`Creating Kanban column "${list.name}"...`)
+						const bucketId = await createBucketRaw(parentProject.id, parentKanbanViewId, list.name, bucketPos)
+						if (bucketId) {
+							trelloListBucketMap.set(list.id, bucketId)
+							importStats.value.buckets++
+							log('success', `Kanban column: ${list.name}`)
+						} else {
+							log('error', `Failed to create Kanban column "${list.name}"`)
+							importStats.value.errors++
+						}
+						bucketPos += 100
+					}
+
+					// Remove the default buckets (To-Do, Doing, Done) since we've replaced them.
+					// Only delete if we successfully created at least one custom bucket.
+					if (trelloListBucketMap.size > 0) {
+						for (const oldBucket of existingBuckets) {
+							await deleteBucketRaw(parentProject.id, parentKanbanViewId, oldBucket.id)
+							log('info', `Removed default bucket "${oldBucket.title}"`)
+						}
+					}
+				} else {
+					log('error', 'Could not find Kanban view on parent project — falling back to simple mode')
 				}
 			}
 		}
@@ -748,21 +899,41 @@ async function startImport() {
 				// ── Done status ──
 				if (card.closed) {
 					payload.done = true
+					payload.done_at = new Date().toISOString()
 				} else if (options.value.markDueCompleteAsDone && card.dueComplete) {
 					payload.done = true
+					payload.done_at = new Date().toISOString()
 				}
 
 				// ── Create the task via raw fetch ──
 				const task = await createTaskRaw(projectId, payload)
 
+				// Track done
+				if (payload.done) {
+					importStats.value.doneCount++
+				}
+
 				// ── Assign task to Kanban bucket ──
-				// This makes the task appear on the Kanban board.
-				const kanbanInfo = projectKanbanInfo.get(projectId)
-				if (kanbanInfo && task.id) {
+				if (options.value.kanbanMode !== 'none' && task.id) {
 					try {
-						await assignTaskToBucket(projectId, kanbanInfo.viewId, kanbanInfo.bucketId, task.id)
-					} catch {
-						// Non-fatal: task exists but won't show on Kanban
+						if (options.value.kanbanMode === 'replicate' && parentKanbanViewId) {
+							// Replicate mode: assign to the Trello-list bucket on parent project
+							const listBucketId = trelloListBucketMap.get(card.idList)
+							if (listBucketId) {
+								await assignTaskToBucket(parentProject.id, parentKanbanViewId, listBucketId, task.id)
+							}
+						}
+
+						// Simple mode (always runs for subproject Kanban, even in replicate mode)
+						const simpleInfo = projectKanbanSimple.get(projectId)
+						if (simpleInfo) {
+							const targetBucket = payload.done
+								? simpleInfo.doneBucketId
+								: simpleInfo.todoBucketId
+							await assignTaskToBucket(projectId, simpleInfo.viewId, targetBucket, task.id)
+						}
+					} catch (bucketErr: any) {
+						log('error', `Bucket assign failed for "${card.name}": ${bucketErr?.message || bucketErr}`)
 					}
 				}
 
@@ -804,7 +975,7 @@ async function startImport() {
 		await projectStore.loadAllProjects()
 
 		progressPercent.value = 100
-		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates).`)
+		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates, ${importStats.value.doneCount} marked done, ${importStats.value.buckets} kanban columns).`)
 
 	} catch (e: any) {
 		log('error', `Import failed: ${e?.message || e}`)
@@ -915,6 +1086,73 @@ async function startImport() {
 	font-size: 0.8rem;
 	color: var(--grey-500);
 	padding-inline-start: 1.5rem;
+}
+
+// Kanban mode radio group
+.option-group {
+	margin-block: 1rem;
+	padding: 1rem;
+	background: var(--grey-50);
+	border-radius: 10px;
+	border: 1px solid var(--grey-200);
+}
+
+.option-group-title {
+	font-size: 0.9rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--grey-500);
+	margin-block-end: 0.75rem;
+}
+
+.radio-options {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.radio-option {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.6rem;
+	padding: 0.7rem 0.9rem;
+	border-radius: 8px;
+	background: var(--grey-100);
+	cursor: pointer;
+	transition: all 150ms ease;
+	border: 1px solid transparent;
+
+	&:hover {
+		background: var(--grey-200);
+	}
+
+	&.is-selected {
+		background: var(--primary-light);
+		border-color: var(--primary);
+	}
+
+	input[type="radio"] {
+		margin-block-start: 0.2rem;
+		flex-shrink: 0;
+	}
+}
+
+.radio-content {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+}
+
+.radio-title {
+	font-weight: 600;
+	font-size: 0.95rem;
+}
+
+.radio-desc {
+	font-size: 0.8rem;
+	color: var(--grey-500);
+	line-height: 1.3;
 }
 
 // Lists
