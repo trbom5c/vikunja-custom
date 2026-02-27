@@ -472,6 +472,16 @@ export function useGanttTaskList<F extends Filters>(
 						const updated = await taskService.update({...task, ...shiftedTask})
 						tasks.value.set(updated.id, updated)
 						shiftedIds.add(updated.id)
+						// Remove ghost — task is now at its real position
+						const preview = cascadePreviews.value.find(p => p.id === previewId)
+						if (preview) {
+							preview.taskIds.delete(task.id)
+							if (preview.taskIds.size === 0) {
+								clearCascadePreview(previewId)
+							} else {
+								cascadePreviews.value = [...cascadePreviews.value]
+							}
+						}
 					} catch (e) {
 						console.error(`Failed to cascade task ${task.id}:`, e)
 					}
@@ -480,7 +490,17 @@ export function useGanttTaskList<F extends Filters>(
 					promptNext()
 				},
 				skip: () => {
-					// Skip this task, move to next
+					// Skip this task — remove its ghost bar from the preview
+					const preview = cascadePreviews.value.find(p => p.id === previewId)
+					if (preview) {
+						preview.taskIds.delete(task.id)
+						if (preview.taskIds.size === 0) {
+							clearCascadePreview(previewId)
+						} else {
+							// Trigger reactivity by replacing the array entry
+							cascadePreviews.value = [...cascadePreviews.value]
+						}
+					}
 					currentIndex++
 					promptNext()
 				},
