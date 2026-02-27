@@ -364,7 +364,7 @@ export function useGanttTaskList<F extends Filters>(
 					}
 				} else if (cascadeMode === 'individual' && onCascadePrompt.value) {
 					// Individual mode: step through each successor one at a time
-					cascadeStepThrough(successors!, deltaDays, 'precedes', absDays, direction, succColor, succPreviewId)
+					await cascadeStepThrough(successors!, deltaDays, 'precedes', absDays, direction, succColor, succPreviewId)
 				} else if (onCascadePrompt.value) {
 					onCascadePrompt.value({
 						label: `↓ ${successors!.length} Downstream`,
@@ -393,11 +393,11 @@ export function useGanttTaskList<F extends Filters>(
 
 	/**
 	 * Individual cascade mode: step through each downstream task one at a time.
-	 * Shows the bubble anchored to each task bar in sequence.
+	 * Collects the full chain first, then shows the bubble anchored to each task bar in sequence.
 	 * ✓ = shift this task, → = skip this task, ✕ = cancel remaining.
 	 */
-	function cascadeStepThrough(
-		chainTasks: ITask[],
+	async function cascadeStepThrough(
+		startTasks: ITask[],
 		deltaDays: number,
 		direction: 'precedes' | 'follows',
 		absDays: number,
@@ -406,9 +406,30 @@ export function useGanttTaskList<F extends Filters>(
 		previewId: string,
 	) {
 		const deltaMs = deltaDays * 24 * 60 * 60 * 1000
+		const shiftedIds = new Set<number>()
+
+		// Collect the full chain of tasks in order (breadth-first walk)
+		const chainTasks: ITask[] = []
+		const visited = new Set<number>()
+
+		async function walkChain(taskList: ITask[]) {
+			for (const t of taskList) {
+				if (visited.has(t.id)) continue
+				visited.add(t.id)
+				chainTasks.push(t)
+				try {
+					const full = await taskService.get(new TaskModel({id: t.id}))
+					const next = full?.relatedTasks?.[direction]
+					if (next && Array.isArray(next) && next.length > 0) {
+						await walkChain(next)
+					}
+				} catch {}
+			}
+		}
+		await walkChain(startTasks)
+
 		const total = chainTasks.length
 		let currentIndex = 0
-		const shiftedIds = new Set<number>()
 
 		// Add all cascade targets to undo snapshot upfront
 		if (undoStack.value) {
