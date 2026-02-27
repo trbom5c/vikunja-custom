@@ -454,6 +454,8 @@ $fileMap = @{
     # Frontend - Project Partials
     "SubprojectFilter.vue"       = "frontend\src\components\project\partials\SubprojectFilter.vue"
     "ProjectCard.vue"            = "frontend\src\components\project\partials\ProjectCard.vue"
+    # Frontend - Project Settings
+    "ProjectSettingsDelete.vue"  = "frontend\src\views\project\settings\ProjectSettingsDelete.vue"
     # Frontend - Navigation
     "Navigation.vue"             = "frontend\src\components\home\Navigation.vue"
     # Frontend - Views

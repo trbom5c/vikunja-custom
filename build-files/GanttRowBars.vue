@@ -403,12 +403,13 @@ function getOverdueTooltip(bar: GanttBarModel): string {
 
 function getBarTooltip(bar: GanttBarModel): string {
 	const label = bar.meta?.label || String(bar.id)
+	const project = bar.meta?.projectName ? `[${bar.meta.projectName}] ` : ''
 	const startStr = bar.start.toLocaleDateString()
 	const endStr = bar.end.toLocaleDateString()
 	if (startStr === endStr) {
-		return `${label} — ${startStr}`
+		return `${project}${label} — ${startStr}`
 	}
-	return `${label} — ${startStr} – ${endStr}`
+	return `${project}${label} — ${startStr} – ${endStr}`
 }
 </script>
 

@@ -13,6 +13,7 @@ export interface GanttBarModel {
 		dateType?: GanttBarDateType
 		isDone?: boolean
 		isAutoGen?: boolean
+		projectName?: string
 		task?: unknown
 		isOverdue?: boolean
 		originalStart?: Date

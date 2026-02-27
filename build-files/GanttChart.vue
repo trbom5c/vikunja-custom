@@ -479,6 +479,7 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 			hasActualDates: Boolean(t.startDate && (t.endDate || t.dueDate)),
 			dateType,
 			isDone: t.done,
+			projectName: projectStore.projects[t.projectId]?.title || '',
 		},
 	}
 }
