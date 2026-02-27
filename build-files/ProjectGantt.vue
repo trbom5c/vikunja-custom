@@ -298,12 +298,15 @@ const flatPickerConfig = computed(() => ({
 
 .gantt-options {
 	display: flex;
-	justify-content: space-between;
 	align-items: center;
-	margin-block-end: 1rem;
+	flex-wrap: wrap;
+	gap: .5rem .75rem;
+	margin-block-end: 0;
+	padding: .5rem;
 
 	@media screen and (max-width: $tablet) {
 		flex-direction: column;
+		align-items: stretch;
 	}
 }
 
@@ -318,17 +321,19 @@ const flatPickerConfig = computed(() => ({
 
 .field {
 	margin-block-end: 0;
-	inline-size: 33%;
+	flex: 0 1 auto;
+	min-inline-size: 180px;
+	max-inline-size: 280px;
 
 	&:not(:last-child) {
-		padding-inline-end: .5rem;
+		padding-inline-end: 0;
 	}
 
 	@media screen and (max-width: $tablet) {
 		inline-size: 100%;
 		max-inline-size: 100%;
-		margin-block-start: .5rem;
-		padding-inline-end: 0 !important;
+		min-inline-size: unset;
+		margin-block-start: .25rem;
 	}
 
 	&, .input {
