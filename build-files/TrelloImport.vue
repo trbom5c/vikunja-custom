@@ -626,6 +626,11 @@ async function startImport() {
 				// Trello card.due and card.start are ISO 8601 strings
 				// like "2025-10-28T00:00:00.000Z".  We convert to Date
 				// then back to ISO to normalize, and send as snake_case.
+				//
+				// When a card has only a due date (no start), we set
+				// due_date + end_date but NOT start_date.  This lets the
+				// gantt chart render it with the "endOnly" fade-in style
+				// instead of a misleading single-day bar.
 				let hasAnyDate = false
 
 				if (card.due) {
@@ -638,12 +643,12 @@ async function startImport() {
 					payload.start_date = new Date(card.start).toISOString()
 					payload.end_date = new Date(card.due).toISOString()
 				} else if (card.start && !card.due) {
-					// Start only → single-day bar at the start date
+					// Start only → set both start and end to start date
 					payload.start_date = new Date(card.start).toISOString()
 					payload.end_date = new Date(card.start).toISOString()
 				} else if (!card.start && card.due) {
-					// Due only → single-day bar at the due date
-					payload.start_date = new Date(card.due).toISOString()
+					// Due only → end_date = due, no start_date
+					// Gantt will render as "endOnly" with fade-in effect
 					payload.end_date = new Date(card.due).toISOString()
 				}
 

@@ -385,20 +385,23 @@ function getOverdueText(bar: GanttBarModel): string {
 	const now = new Date()
 	const diffMs = now.getTime() - originalEnd.getTime()
 	const diffDays = Math.floor(diffMs / MILLISECONDS_A_DAY)
-	if (diffDays <= 0) return bar.meta?.label || 'Overdue'
-	if (diffDays === 1) return `${bar.meta?.label} (1 day overdue)`
-	if (diffDays < 30) return `${bar.meta?.label} (${diffDays}d overdue)`
+	const project = bar.meta?.projectName ? `[${bar.meta.projectName}] ` : ''
+	const label = bar.meta?.label || 'Overdue'
+	if (diffDays <= 0) return `${project}${label}`
+	if (diffDays === 1) return `${project}${label} (1 day overdue)`
+	if (diffDays < 30) return `${project}${label} (${diffDays}d overdue)`
 	const weeks = Math.floor(diffDays / 7)
-	if (diffDays < 60) return `${bar.meta?.label} (${weeks}w overdue)`
+	if (diffDays < 60) return `${project}${label} (${weeks}w overdue)`
 	const months = Math.floor(diffDays / 30)
-	return `${bar.meta?.label} (${months}mo overdue)`
+	return `${project}${label} (${months}mo overdue)`
 }
 
 function getOverdueTooltip(bar: GanttBarModel): string {
 	const origStart = bar.meta?.originalStart as Date | undefined
 	const origEnd = bar.meta?.originalEnd as Date | undefined
-	if (!origStart || !origEnd) return 'Overdue task'
-	return `Overdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
+	const project = bar.meta?.projectName ? `[${bar.meta.projectName}] ` : ''
+	if (!origStart || !origEnd) return `${project}Overdue task`
+	return `${project}Overdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
 }
 
 function getBarTooltip(bar: GanttBarModel): string {
