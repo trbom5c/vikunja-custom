@@ -263,9 +263,11 @@
 import {ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {useGanttArrowConfig} from '@/composables/useGanttArrowConfig'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 const {t} = useI18n({useScope: 'global'})
 const {config, resetToDefaults, importConfig, exportConfig} = useGanttArrowConfig()
+const prefs = useUserPreferences()
 
 const isOpen = ref(false)
 const showImport = ref(false)
@@ -274,33 +276,27 @@ const statusMsg = ref('')
 const arrowConfigOpen = ref(false)
 
 // Cascade prompt style preference
-const CASCADE_PREF_KEY = 'gantt-cascade-prompt-style'
 const cascadeStyle = ref<'toast' | 'modal'>((() => {
-	try {
-		const val = localStorage.getItem(CASCADE_PREF_KEY)
-		if (val === 'modal' || val === 'toast') return val
-	} catch {}
+	const val = prefs.get('gantt-cascade-prompt-style', 'toast')
+	if (val === 'modal' || val === 'toast') return val
 	return 'toast'
 })())
 
 watch(cascadeStyle, (val) => {
-	try { localStorage.setItem(CASCADE_PREF_KEY, val) } catch {}
+	prefs.set('gantt-cascade-prompt-style', val)
 	statusMsg.value = 'Saved'
 	setTimeout(() => statusMsg.value = '', 1500)
 })
 
 // Cascade mode: bulk (all at once) or individual (one by one)
-const CASCADE_MODE_KEY = 'gantt-cascade-mode'
 const cascadeMode = ref<'bulk' | 'individual'>((() => {
-	try {
-		const val = localStorage.getItem(CASCADE_MODE_KEY)
-		if (val === 'bulk' || val === 'individual') return val
-	} catch {}
+	const val = prefs.get('gantt-cascade-mode', 'bulk')
+	if (val === 'bulk' || val === 'individual') return val
 	return 'bulk'
 })())
 
 watch(cascadeMode, (val) => {
-	try { localStorage.setItem(CASCADE_MODE_KEY, val) } catch {}
+	prefs.set('gantt-cascade-mode', val)
 	statusMsg.value = 'Saved'
 	setTimeout(() => statusMsg.value = '', 1500)
 })

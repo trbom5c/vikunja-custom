@@ -121,6 +121,7 @@ import type {RouteLocationNormalized} from 'vue-router'
 
 import {useBaseStore} from '@/stores/base'
 import {useFlatpickrLanguage} from '@/helpers/useFlatpickrLanguage'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import Foo from '@/components/misc/flatpickr/Flatpickr.vue'
 import ProjectWrapper from '@/components/project/ProjectWrapper.vue'
@@ -150,6 +151,10 @@ const props = defineProps<{
 
 const baseStore = useBaseStore()
 const canWrite = computed(() => baseStore.currentProject?.maxPermission > PERMISSIONS.READ)
+
+// Initialize user preferences (loads from API, migrates localStorage keys)
+const {init: initPrefs} = useUserPreferences()
+initPrefs()
 
 const {route, viewId} = toRefs(props)
 

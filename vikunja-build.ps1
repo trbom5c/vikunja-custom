@@ -377,12 +377,14 @@ $fileMap = @{
     "auto_task_template.go"      = "pkg\models\auto_task_template.go"
     "auto_task_create.go"        = "pkg\models\auto_task_create.go"
     "auto_task_cron.go"          = "pkg\models\auto_task_cron.go"
+    "user_preference.go"         = "pkg\models\user_preference.go"
     "tasks.go"                   = "pkg\models\tasks.go"
     "project.go"                 = "pkg\models\project.go"
     "task_collection.go"         = "pkg\models\task_collection.go"
     # Backend - Handlers
     "chain_step_attachment.go"   = "pkg\routes\api\v1\chain_step_attachment.go"
     "auto_task_handler.go"       = "pkg\routes\api\v1\auto_task_handler.go"
+    "user_preferences_handler.go" = "pkg\routes\api\v1\user_preferences_handler.go"
     # Backend - Migrations
     "20260223120000.go"          = "pkg\migration\20260223120000.go"
     "20260224040000.go"          = "pkg\migration\20260224040000.go"
@@ -394,6 +396,7 @@ $fileMap = @{
     "20260224122023.go"          = "pkg\migration\20260224122023.go"
     "20260227000000.go"          = "pkg\migration\20260227000000.go"
     "20260227010000.go"          = "pkg\migration\20260227010000.go"
+    "20260227020000.go"          = "pkg\migration\20260227020000.go"
     # Backend - Routes + Init
     "routes.go"                  = "pkg\routes\routes.go"
     "init.go"                    = "pkg\initialize\init.go"
@@ -416,6 +419,7 @@ $fileMap = @{
     "taskDuplicateService.ts"    = "frontend\src\services\taskDuplicateService.ts"
     "taskChainApi.ts"            = "frontend\src\services\taskChainApi.ts"
     "autoTaskApi.ts"             = "frontend\src\services\autoTaskApi.ts"
+    "userPreferencesApi.ts"      = "frontend\src\services\userPreferencesApi.ts"
     # Frontend - Stores + Composables
     "tasks.ts"                   = "frontend\src\stores\tasks.ts"
     "useDragReorder.ts"          = "frontend\src\composables\useDragReorder.ts"
@@ -423,6 +427,7 @@ $fileMap = @{
     "useTaskList.ts"             = "frontend\src\composables\useTaskList.ts"
     "useGanttBar.ts"             = "frontend\src\composables\useGanttBar.ts"
     "useGanttArrowConfig.ts"     = "frontend\src\composables\useGanttArrowConfig.ts"
+    "useUserPreferences.ts"      = "frontend\src\composables\useUserPreferences.ts"
     "useGanttFilters.ts"         = "frontend\src\views\project\helpers\useGanttFilters.ts"
     "useGanttTaskList.ts"        = "frontend\src\views\project\helpers\useGanttTaskList.ts"
     # Frontend - Gantt

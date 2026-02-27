@@ -1,4 +1,5 @@
 import {reactive, watch} from 'vue'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 const STORAGE_KEY = 'gantt-arrow-config'
 
@@ -58,24 +59,19 @@ const DEFAULTS: GanttArrowConfig = {
 }
 
 function loadConfig(): GanttArrowConfig {
-	try {
-		const stored = localStorage.getItem(STORAGE_KEY)
-		if (stored) {
-			const parsed = JSON.parse(stored)
-			return {...DEFAULTS, ...parsed}
-		}
-	} catch {
-		// ignore
+	const prefs = useUserPreferences()
+	const raw = prefs.get(STORAGE_KEY, '')
+	if (raw) {
+		try {
+			return {...DEFAULTS, ...JSON.parse(raw)}
+		} catch {}
 	}
 	return {...DEFAULTS}
 }
 
 function saveConfig(config: GanttArrowConfig) {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
-	} catch {
-		// ignore
-	}
+	const prefs = useUserPreferences()
+	prefs.set(STORAGE_KEY, JSON.stringify(config))
 }
 
 // Singleton reactive config

@@ -12,24 +12,21 @@ import {error, success, warning} from '@/message'
 import {useAuthStore} from '@/stores/auth'
 import {useTaskStore} from '@/stores/tasks'
 import type {IProjectView} from '@/modelTypes/IProjectView'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 // Cascade prompt style: 'toast' = sticky pulse toast, 'modal' = confirm dialog overlay
-const CASCADE_PREF_KEY = 'gantt-cascade-prompt-style'
 function getCascadePromptStyle(): 'toast' | 'modal' {
-	try {
-		const val = localStorage.getItem(CASCADE_PREF_KEY)
-		if (val === 'modal' || val === 'toast') return val
-	} catch {}
+	const prefs = useUserPreferences()
+	const val = prefs.get('gantt-cascade-prompt-style', 'toast')
+	if (val === 'modal' || val === 'toast') return val
 	return 'toast'
 }
 
 // Cascade mode: 'bulk' = shift all at once, 'individual' = confirm each
-const CASCADE_MODE_KEY = 'gantt-cascade-mode'
 function getCascadeMode(): 'bulk' | 'individual' {
-	try {
-		const val = localStorage.getItem(CASCADE_MODE_KEY)
-		if (val === 'bulk' || val === 'individual') return val
-	} catch {}
+	const prefs = useUserPreferences()
+	const val = prefs.get('gantt-cascade-mode', 'bulk')
+	if (val === 'bulk' || val === 'individual') return val
 	return 'bulk'
 }
 export interface CascadePreview {
