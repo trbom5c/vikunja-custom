@@ -1,6 +1,6 @@
 <template>
 	<Modal
-		@close="$router.back()"
+		@close="!isDeleting && $router.back()"
 		@submit="deleteProject()"
 	>
 		<template #header>
@@ -8,25 +8,41 @@
 		</template>
 
 		<template #text>
-			<p>
-				{{ $t('project.delete.text1') }}
-			</p>
+			<!-- Normal confirmation state -->
+			<template v-if="!isDeleting">
+				<p>
+					{{ $t('project.delete.text1') }}
+				</p>
 
-			<p
-				v-if="totalTasks !== null"
-				class="has-text-weight-bold"
-			>
-				{{ deleteNotice }}
-			</p>
-			<Loading
-				v-else
-				class="is-loading-small"
-				variant="default"
-			/>
+				<p
+					v-if="totalTasks !== null"
+					class="has-text-weight-bold"
+				>
+					{{ deleteNotice }}
+				</p>
+				<Loading
+					v-else
+					class="is-loading-small"
+					variant="default"
+				/>
 
-			<p>
-				{{ $t('misc.cannotBeUndone') }}
-			</p>
+				<p>
+					{{ $t('misc.cannotBeUndone') }}
+				</p>
+			</template>
+
+			<!-- Deleting in progress -->
+			<template v-else>
+				<div class="deleting-progress">
+					<Loading class="is-loading" variant="default" />
+					<p class="deleting-text">
+						Deleting {{ totalTasks ?? '' }} tasks across {{ projectIdsToDelete.length }} project{{ projectIdsToDelete.length === 1 ? '' : 's' }}...
+					</p>
+					<p class="deleting-hint">
+						This may take a moment for large projects.
+					</p>
+				</div>
+			</template>
 		</template>
 	</Modal>
 </template>
@@ -47,6 +63,7 @@ const route = useRoute()
 const router = useRouter()
 
 const totalTasks = ref<number | null>(null)
+const isDeleting = ref(false)
 
 const project = computed(() => projectStore.projects[route.params.projectId])
 const projectIdsToDelete = ref<number[]>([])
@@ -84,12 +101,39 @@ const deleteNotice = computed(() => {
 })
 
 async function deleteProject() {
-	if (!project.value) {
+	if (!project.value || isDeleting.value) {
 		return
 	}
 
-	await projectStore.deleteProject(project.value)
-	success({message: t('project.delete.success')})
-	router.push({name: 'home'})
+	isDeleting.value = true
+
+	try {
+		await projectStore.deleteProject(project.value)
+		success({message: t('project.delete.success')})
+		router.push({name: 'home'})
+	} catch (e) {
+		// If deletion fails, return to confirmation state so user can retry
+		isDeleting.value = false
+		throw e
+	}
 }
 </script>
+
+<style scoped lang="scss">
+.deleting-progress {
+	text-align: center;
+	padding: 1.5rem 0;
+}
+
+.deleting-text {
+	margin-block-start: 1rem;
+	font-weight: 600;
+	font-size: 1.05rem;
+}
+
+.deleting-hint {
+	margin-block-start: 0.5rem;
+	color: var(--grey-500);
+	font-size: 0.9rem;
+}
+</style>
