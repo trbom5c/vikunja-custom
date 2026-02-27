@@ -1,7 +1,7 @@
 <template>
 	<Notifications
 		position="bottom left"
-		:max="2"
+		:max="5"
 		:ignore-duplicates="true"
 		class="global-notification"
 	>
@@ -62,6 +62,21 @@
 <style scoped>
 .vue-notification {
 	z-index: 9999;
+}
+
+.vue-notification.warning {
+	background: #f0ad4e;
+	border-left-color: #d48b0c;
+	color: #1a1a1a;
+}
+
+.vue-notification.warning .notification-title {
+	color: #1a1a1a;
+	font-weight: 600;
+}
+
+.vue-notification.warning .notification-content {
+	color: #2a2a2a;
 }
 
 .tw-flex {

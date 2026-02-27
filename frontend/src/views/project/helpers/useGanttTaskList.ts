@@ -8,7 +8,7 @@ import TaskCollectionService, {type TaskFilterParams} from '@/services/taskColle
 import TaskService from '@/services/task'
 
 import TaskModel from '@/models/task'
-import {error, success} from '@/message'
+import {error, success, warning} from '@/message'
 import {useAuthStore} from '@/stores/auth'
 import {useTaskStore} from '@/stores/tasks'
 import type {IProjectView} from '@/modelTypes/IProjectView'
@@ -19,6 +19,8 @@ export interface UseGanttTaskListReturn {
 	loadTasks: () => Promise<void>
 	addTask: (task: Partial<ITask>) => Promise<ITask>
 	updateTask: (task: ITaskPartialWithId) => Promise<void>
+	canUndo: ComputedRef<boolean>
+	undoLastAction: () => Promise<void>
 }
 
 // FIXME: unify with general `useTaskList`
@@ -27,6 +29,7 @@ export function useGanttTaskList<F extends Filters>(
 	filterToApiParams: (filters: F) => TaskFilterParams,
 	viewId: Ref<IProjectView['id']>,
 	loadAll: boolean = true,
+	extraParams?: Ref<Record<string, unknown>>,
 ) : UseGanttTaskListReturn {
 	const taskCollectionService = shallowReactive(new TaskCollectionService())
 	const taskService = shallowReactive(new TaskService())
@@ -36,13 +39,64 @@ export function useGanttTaskList<F extends Filters>(
 
 	const tasks = ref<Map<ITask['id'], ITask>>(new Map())
 
+	// Undo stack: stores snapshots of task states before changes
+	interface UndoEntry {
+		snapshots: Map<ITask['id'], ITask>  // original task states before the action
+		timestamp: number
+	}
+	const undoStack = ref<UndoEntry | null>(null)
+	const canUndo = computed(() => undoStack.value !== null)
+	let undoTimer: ReturnType<typeof setTimeout> | null = null
+	const UNDO_TIMEOUT_MS = 7500
+
+	function pushUndoSnapshot(taskIds: ITask['id'][]) {
+		const snapshots = new Map<ITask['id'], ITask>()
+		for (const id of taskIds) {
+			const t = tasks.value.get(id)
+			if (t) snapshots.set(id, klona(t))
+		}
+		undoStack.value = {snapshots, timestamp: Date.now()}
+
+		// Auto-expire after timeout
+		if (undoTimer) clearTimeout(undoTimer)
+		undoTimer = setTimeout(() => {
+			undoStack.value = null
+		}, UNDO_TIMEOUT_MS)
+	}
+
+	async function undoLastAction() {
+		if (!undoStack.value) return
+
+		const {snapshots} = undoStack.value
+		undoStack.value = null
+		if (undoTimer) {
+			clearTimeout(undoTimer)
+			undoTimer = null
+		}
+
+		for (const [id, originalTask] of snapshots) {
+			try {
+				const restored = await taskService.update(originalTask)
+				tasks.value.set(restored.id, restored)
+			} catch (e) {
+				console.error(`Failed to undo task ${id}:`, e)
+			}
+		}
+		success({message: 'Undone'})
+	}
+
 	async function fetchTasks(params: TaskFilterParams, page = 1): Promise<ITask[]> {
 
 		if (params.filter_timezone === '') {
 			params.filter_timezone = authStore.settings.timezone
 		}
+
+		// Merge any extra params (e.g. include_subprojects, exclude_project_ids)
+		const mergedParams = extraParams?.value
+			? {...params, ...extraParams.value}
+			: params
 		
-		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, params, page) as ITask[]
+		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, mergedParams, page) as ITask[]
 		if (loadAll && page < taskCollectionService.totalPages) {
 			const nextTasks = await fetchTasks(params, page + 1)
 			return tasks.concat(nextTasks)
@@ -94,6 +148,9 @@ export function useGanttTaskList<F extends Filters>(
 
 		if (!oldTask) return
 
+		// Capture pre-change snapshot for undo (just this task for now; cascade adds more)
+		pushUndoSnapshot([task.id])
+
 		// we extend the task with potentially missing info
 		const newTask: ITask = {
 			...oldTask,
@@ -107,11 +164,142 @@ export function useGanttTaskList<F extends Filters>(
 			const updatedTask = await taskService.update(newTask)
 			// update the task with possible changes from server
 			tasks.value.set(updatedTask.id, updatedTask)
-			success('Saved')
+			success({message: 'Saved'}, [{title: 'Undo', callback: undoLastAction}])
+
+			// Check for date cascade: if start or end date changed, check for downstream chain tasks
+			const startChanged = oldTask.startDate?.toString() !== newTask.startDate?.toString()
+			const endChanged = oldTask.endDate?.toString() !== newTask.endDate?.toString()
+
+			if (startChanged || endChanged) {
+				await checkCascadeDownstream(updatedTask, oldTask)
+			}
 		} catch (_) {
 			error('Something went wrong saving the task')
 			// roll back changes
 			tasks.value.set(task.id, oldTask)
+			undoStack.value = null
+		}
+	}
+
+	async function checkCascadeDownstream(updatedTask: ITask, oldTask: ITask) {
+		try {
+			const fullTask = await taskService.get(new TaskModel({id: updatedTask.id}))
+			// "precedes" = tasks that come AFTER this one (downstream successors)
+			const successors = fullTask?.relatedTasks?.precedes
+			// "follows" = tasks that come BEFORE this one (upstream predecessors)
+			const predecessors = fullTask?.relatedTasks?.follows
+
+			const hasSuccessors = successors && Array.isArray(successors) && successors.length > 0
+			const hasPredecessors = predecessors && Array.isArray(predecessors) && predecessors.length > 0
+
+			if (!hasSuccessors && !hasPredecessors) return
+
+			const oldStart = oldTask.startDate ? new Date(oldTask.startDate).getTime() : 0
+			const newStart = updatedTask.startDate ? new Date(updatedTask.startDate).getTime() : 0
+			if (oldStart === 0 || newStart === 0) return
+
+			const deltaDays = Math.round((newStart - oldStart) / (1000 * 60 * 60 * 24))
+			if (deltaDays === 0) return
+
+			const absDays = Math.abs(deltaDays)
+			const movedEarlier = deltaDays < 0
+			const today = new Date()
+			today.setHours(0, 0, 0, 0)
+
+			// Upstream: if moved earlier and now overlaps/precedes a predecessor, offer to shift them
+			if (movedEarlier && hasPredecessors) {
+				const collides = predecessors!.some(p => p.startDate && new Date(newStart) <= new Date(p.startDate))
+				if (collides) {
+					const earliest = findEarliestDate(predecessors!)
+					if (earliest) {
+						const shifted = new Date(earliest.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+						if (shifted < today) {
+							warning(`Shifting predecessors will move tasks to ${shifted.toLocaleDateString()}, which is in the past.`)
+						}
+					}
+					warning(`This task now overlaps its predecessor(s).`, [{
+						title: `Shift ${predecessors!.length} predecessor(s) ${absDays} day(s) back`,
+						callback: () => cascadeShiftChain(predecessors!, deltaDays, 'follows'),
+					}])
+				}
+			}
+
+			// Downstream: always offer to shift successors
+			if (hasSuccessors) {
+				if (movedEarlier) {
+					const earliest = findEarliestDate(successors!)
+					if (earliest) {
+						const shifted = new Date(earliest.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+						if (shifted < today) {
+							warning(`Shifting downstream will move tasks to ${shifted.toLocaleDateString()}, which is in the past.`)
+						}
+					}
+				}
+				const direction = deltaDays > 0 ? 'forward' : 'back'
+				warning(`${successors!.length} downstream task(s) can be shifted ${absDays} day(s) ${direction}.`, [{
+					title: `Shift downstream`,
+					callback: () => cascadeShiftChain(successors!, deltaDays, 'precedes'),
+				}])
+			}
+		} catch (e) {
+			console.error('Failed to check cascade:', e)
+		}
+	}
+
+	function findEarliestDate(tasks: ITask[]): Date | null {
+		let earliest: Date | null = null
+		for (const t of tasks) {
+			if (t.startDate) {
+				const d = new Date(t.startDate)
+				if (!earliest || d < earliest) earliest = d
+			}
+		}
+		return earliest
+	}
+
+	async function cascadeShiftChain(chainTasks: ITask[], deltaDays: number, direction: 'precedes' | 'follows') {
+		const deltaMs = deltaDays * 24 * 60 * 60 * 1000
+
+		// Add all cascade targets to undo snapshot
+		if (undoStack.value) {
+			for (const t of chainTasks) {
+				const existing = tasks.value.get(t.id)
+				if (existing && !undoStack.value.snapshots.has(t.id)) {
+					undoStack.value.snapshots.set(t.id, klona(existing))
+				}
+			}
+		}
+
+		for (const t of chainTasks) {
+			const shiftedTask: Record<string, any> = {id: t.id}
+
+			if (t.startDate) {
+				shiftedTask.startDate = new Date(new Date(t.startDate).getTime() + deltaMs)
+			}
+			if (t.endDate) {
+				shiftedTask.endDate = new Date(new Date(t.endDate).getTime() + deltaMs)
+			}
+			if (t.dueDate) {
+				shiftedTask.dueDate = new Date(new Date(t.dueDate).getTime() + deltaMs)
+			}
+
+			try {
+				const updated = await taskService.update({...t, ...shiftedTask})
+				tasks.value.set(updated.id, updated)
+
+				// Continue in the same direction only
+				try {
+					const full = await taskService.get(new TaskModel({id: updated.id}))
+					const nextTasks = full?.relatedTasks?.[direction]
+					if (nextTasks && Array.isArray(nextTasks) && nextTasks.length > 0) {
+						await cascadeShiftChain(nextTasks, deltaDays, direction)
+					}
+				} catch {
+					// End of chain
+				}
+			} catch (e) {
+				console.error(`Failed to cascade task ${t.id}:`, e)
+			}
 		}
 	}
 
@@ -124,5 +312,7 @@ export function useGanttTaskList<F extends Filters>(
 
 		addTask,
 		updateTask,
+		canUndo,
+		undoLastAction,
 	}
 }
