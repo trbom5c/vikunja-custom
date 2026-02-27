@@ -197,6 +197,7 @@ const {
 	undoLastAction,
 	cascadePreviews,
 	onCascadePrompt,
+	onCascadeClose,
 } = useGanttFilters(route, viewId, subprojectParams)
 
 // Ref to GanttChart for cascade bubble
@@ -206,6 +207,13 @@ const ganttChartRef = ref<InstanceType<typeof GanttChart> | null>(null)
 onCascadePrompt.value = (info) => {
 	if (ganttChartRef.value?.showCascadeInBubble) {
 		ganttChartRef.value.showCascadeInBubble(info)
+	}
+}
+
+// Wire cascade close to dismiss the bubble
+onCascadeClose.value = () => {
+	if (ganttChartRef.value?.closeCascadeBubble) {
+		ganttChartRef.value.closeCascadeBubble()
 	}
 }
 

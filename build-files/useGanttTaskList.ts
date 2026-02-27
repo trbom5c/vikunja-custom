@@ -50,6 +50,7 @@ export interface UseGanttTaskListReturn {
 	undoLastAction: () => Promise<void>
 	cascadePreviews: Ref<CascadePreview[]>
 	onCascadePrompt: Ref<((info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) => void) | null>
+	onCascadeClose: Ref<(() => void) | null>
 }
 
 // FIXME: unify with general `useTaskList`
@@ -118,6 +119,7 @@ export function useGanttTaskList<F extends Filters>(
 
 	let cascadeIdCounter = 0
 	const onCascadePrompt = ref<((info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) => void) | null>(null)
+	const onCascadeClose = ref<(() => void) | null>(null)
 
 	function clearCascadePreview(previewId?: string) {
 		if (previewId) {
@@ -420,8 +422,9 @@ export function useGanttTaskList<F extends Filters>(
 
 		function promptNext() {
 			if (currentIndex >= total || !onCascadePrompt.value) {
-				// Done — clean up previews, refetch for arrows
+				// Done — clean up previews, close bubble, refetch for arrows
 				clearCascadePreview(previewId)
+				if (onCascadeClose.value) onCascadeClose.value()
 				if (shiftedIds.size > 0) {
 					loadTasks()
 				}
@@ -466,6 +469,7 @@ export function useGanttTaskList<F extends Filters>(
 				dismiss: () => {
 					// Cancel all remaining
 					clearCascadePreview(previewId)
+					if (onCascadeClose.value) onCascadeClose.value()
 					if (shiftedIds.size > 0) {
 						loadTasks()
 					}
@@ -546,5 +550,6 @@ export function useGanttTaskList<F extends Filters>(
 		undoLastAction,
 		cascadePreviews,
 		onCascadePrompt,
+		onCascadeClose,
 	}
 }

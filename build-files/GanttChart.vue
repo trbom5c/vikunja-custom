@@ -332,8 +332,12 @@ function skipCascadeIndividual() {
 	// Don't close bubble — skip callback will call promptNext() which re-calls showCascadeInBubble
 }
 
+function closeCascadeBubble() {
+	dragConfirm.value = null
+}
+
 // Expose to parent for composable access
-defineExpose({showCascadeInBubble})
+defineExpose({showCascadeInBubble, closeCascadeBubble})
 
 const dateFromDate = computed(() => dayjs(filters.value.dateFrom).startOf('day').toDate())
 const dateToDate = computed(() => dayjs(filters.value.dateTo).endOf('day').toDate())
