@@ -38,6 +38,7 @@
 						@update:colorMap="onColorMapChange"
 					/>
 					<GanttArrowSettings />
+					<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
 					<XButton
 						v-if="canUndo"
 						variant="tertiary"
@@ -347,7 +348,14 @@ const flatPickerConfig = computed(() => ({
 }
 
 .gantt-undo-btn {
-	margin-inline-start: auto;
 	white-space: nowrap;
+}
+
+.gantt-zoom-hint {
+	font-size: 0.65rem;
+	color: var(--grey-500, #888);
+	white-space: nowrap;
+	user-select: none;
+	margin-inline-start: auto;
 }
 </style>
