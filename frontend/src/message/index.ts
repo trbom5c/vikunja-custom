@@ -50,8 +50,24 @@ export function success(e, actions: Action[] = []) {
 		title: i18n.global.t('error.success'),
 		text: getErrorText(e),
 		ignoreDuplicates: true,
+		duration: actions.length > 0 ? 7500 : 4000,
 		data: {
 			actions: actions,
+		},
+	})
+}
+
+export function warning(message: string, actions: Action[] = [], options?: {accentColor?: string, label?: string}) {
+	notify({
+		type: 'warning',
+		title: options?.label || 'Warning',
+		text: message,
+		ignoreDuplicates: false,
+		duration: actions.length > 0 ? -1 : 6000,
+		data: {
+			actions: actions,
+			sticky: actions.length > 0,
+			accentColor: options?.accentColor || null,
 		},
 	})
 }
