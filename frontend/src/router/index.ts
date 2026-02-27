@@ -140,11 +140,6 @@ const router = createRouter({
 					component: () => import('@/views/user/settings/ApiTokens.vue'),
 				},
 				{
-					path: '/user/settings/sessions',
-					name: 'user.settings.sessions',
-					component: () => import('@/views/user/settings/Sessions.vue'),
-				},
-				{
 					path: '/user/settings/migrate',
 					name: 'migrate.start',
 					component: () => import('@/views/migrate/Migration.vue'),
@@ -367,6 +362,11 @@ const router = createRouter({
 			path: '/labels',
 			name: 'labels.index',
 			component: () => import('@/views/labels/ListLabels.vue'),
+		},
+		{
+			path: '/templates',
+			name: 'templates.index',
+			component: () => import('@/views/templates/ListTemplates.vue'),
 		},
 		{
 			path: '/labels/new',
