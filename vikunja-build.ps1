@@ -471,8 +471,10 @@ $fileMap = @{
     "Notification.vue"           = "frontend\src\components\misc\Notification.vue"
     # Documentation
     "CHANGELOG.md"               = "CHANGELOG.md"
+    "README.md"                  = "README.md"
     "AUTO_TASKS.md"              = "docs\AUTO_TASKS.md"
     "PATCH_MANIFEST.md"          = "docs\PATCH_MANIFEST.md"
+    "GANTT_FEATURES.md"          = "docs\GANTT_FEATURES.md"
 }
 
 $patched = 0

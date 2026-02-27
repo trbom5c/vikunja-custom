@@ -1,139 +1,140 @@
 # Vikunja Custom Build — Changelog
 
-All notable changes to this custom Vikunja build are documented here.
+All notable changes to this custom Vikunja build.
 
-## Phase 2g: Auto-Generated Tasks + Build Fixes (2025-02-24)
+## Phase 3: Gantt Polish + User Preferences (2026-02-27)
 
-### New Feature: Auto-Generated Task Templates
-Task templates that automatically create task instances when they become due,
-without cluttering the board with future tasks.
+### User Preferences API (Account-Synced Settings)
+- New `user_preferences` table with unique `(user_id, key)` index
+- `GET/POST/DELETE /api/v1/user/settings/preferences` endpoints
+- `useUserPreferences` composable: loads from API, caches in reactive Map, debounced 800ms writes, localStorage fallback for offline/link shares
+- Auto-migrates existing `gantt-*` localStorage keys to server on first load
+- All gantt settings (arrow config, cascade mode, prompt style) now sync across devices
+- Arrow config re-hydrates after preferences load via `watch(prefsLoaded)` to handle singleton timing
 
-**Core behavior:**
-- Only ONE open (undone) instance per template at any time — no pile-up
-- If the previous task isn't completed, it simply goes overdue naturally
-- Next due date recalculates from COMPLETION time, not creation time
-- Pause/resume individual templates without deleting them
-- Manual "Send to project now" button for immediate creation
-- Generation log tracks every creation (system vs manual trigger)
+### Gantt Drag Date Tooltip
+- Floating date range tooltip appears below bar while dragging
+- Shows projected `Mar 22 – Mar 29` format, updates in real-time as bar slides
+- rAF-tracked positioning anchored to `data-task-id` element
 
-**Backend files:**
-- `auto_task_template.go` — Model, CRUD, permissions (owner-only)
-- `auto_task_create.go` — Check logic, trigger, completion handler
-- `auto_task_handler.go` — API handlers for trigger and check endpoints
-- Migration `20260224070000.go` — 3 tables + `tasks.auto_template_id` column
+### Gantt Cascade Fixes
+- **Bubble stuck on completion** — new `onCascadeClose` ref wired through composable → filters → GanttChart chain to dismiss bubble when cascade finishes or is dismissed
+- **Only direct successors prompted** — rewrote `cascadeStepThrough` as async with `walkChain()` depth-first traversal to collect full chain (A→B→C→D shows "1 of 3", "2 of 3", "3 of 3")
+- **Scrim intercepting clicks** — scrim now only renders during move phase, not cascade phase
 
-**API Endpoints:**
-- `GET    /api/v1/autotasks` — List user's templates (with generation log)
-- `GET    /api/v1/autotasks/:id` — Get one template
-- `PUT    /api/v1/autotasks` — Create template
-- `POST   /api/v1/autotasks/:id` — Update template
-- `DELETE /api/v1/autotasks/:id` — Delete template + log
-- `POST   /api/v1/autotasks/:id/trigger` — Manually create task NOW
-- `POST   /api/v1/autotasks/check` — Check and create due tasks
+### Gantt UX Improvements
+- **Trackpad zoom** — Ctrl+scroll/pinch zooms gantt (10–80px/day), `preventDefault` blocks native browser zoom
+- **Zoom hint** — subtle "Ctrl + scroll to zoom" text in toolbar
+- **Button tooltips** — title attributes on all drag confirm and cascade buttons
+- **Settings feedback** — "Saved" toast flashes when cascade mode or prompt style changes
 
-**Frontend:**
-- `AutoTaskEditor.vue` — Card-based editor with pause/resume, send now, generation log
+### Toolbar Refactor
+- Removed Card + FormField wrappers around gantt options
+- Single compact toolbar: date picker + checkboxes left, subproject filter + settings + zoom hint right
+- `.75rem` fonts, tight gaps, minimal vertical footprint
+
+### Auto-Task Warning Toast
+- `triggerNow()` catch block changed from `success()` to `warning()` for skip messages like "open task already exists"
+
+### Build Script Updates
+- Build-tools repo auto-pushed on release
+- Configurable release repos via `-Setup` wizard
+- `$fileMap` entries added for all new files (user_preference.go, user_preferences_handler.go, 20260227020000.go, userPreferencesApi.ts, useUserPreferences.ts)
+
+---
+
+## Phase 2g: Auto-Generated Tasks + Build Fixes (2026-02-24)
+
+### Auto-Generated Task Templates
+- Recurring templates that create task instances when due
+- One open instance per template — no pile-up
+- Completion-based scheduling (next due from completion, not creation)
+- Pause/resume without deleting
+- Manual "Send to project now" trigger
+- Generation log with trigger type tracking
+- Log truncation and schedule reset
+
+### Backend
+- `auto_task_template.go` — Model, CRUD, permissions
+- `auto_task_create.go` — Check, trigger, completion handler
+- `auto_task_handler.go` — API handlers (echo v5)
+- `auto_task_cron.go` — Cron registration
+- 4 migrations for tables, columns, cron
+
+### Frontend
+- `AutoTaskEditor.vue` — Card editor with pause/resume, trigger, log viewer
 - `autoTaskApi.ts` — HTTP client
-- Third "Auto-Generated" tab in Templates page (robot icon)
-- Auto-check trigger on Home page load
-- 41 new i18n keys
+- Third "Auto-Generated" tab in Templates page
+- Auto-check on Home page load
+- 41+ i18n keys
 
-### Build Compatibility Fixes
-- All handler files updated to echo v5 (`github.com/labstack/echo/v5`)
-- Handler function signatures use `c *echo.Context` (pointer, v5 style)
-- `echo.NewHTTPError` always called with two args `(statusCode, message)`
-- Auth retrieved via `auth2.GetAuthFromClaims(c)` from `pkg/modules/auth`
-- `auto_template_id` set via raw SQL (not added to Task struct)
-- `createTask` called with correct 5-arg signature `(s, task, auth, false, false)`
-- `TaskAssginee` uses Vikunja's original spelling (typo in upstream)
-- `ReadAll` returns `(interface{}, int, int64, error)` matching CObject interface
-- `PermissionAdmin` used instead of non-existent `web.RightAdmin`
-
-### Default Duration Unit Setting
-- ChainEditor now uses `useStorage('chainDefaultTimeUnit', 'days')`
-- New chain steps default to the user's preferred unit
-- Persists in localStorage
-
-### Known TODOs
-- Backend cron goroutine for auto-task reliability without frontend trigger
-- Hook `OnAutoTaskCompleted` into task update path when `done` changes
-- Attachment copying from template to generated task
-- Auto-gen indicator icon on task list items
+### Build Compatibility
+- All handlers updated to echo v5 patterns
+- `auto_template_id` via raw SQL (not added to Task struct)
+- Correct `createTask` 5-arg signature
 
 ---
 
-## Phase 2f: Time Units + Filters (2025-02-24)
+## Phase 2f: Time Units + Filters (2026-02-24)
 
-### Selectable Time Units for Chain Steps
-- Chain step offset and duration support hours, days, weeks, months
-- Dropdown selectors replace hardcoded "(days)" labels
-- Backend converts units to `time.Duration` for date calculation
-- Migration `20260224060000.go` adds `offset_unit`, `duration_unit` columns
+### Chain Step Time Units
+- Hours, days, weeks, months for offset and duration
+- Dropdown selectors in ChainEditor
+- Backend unit-aware date math
+- Migration adds `offset_unit`, `duration_unit` columns
 
-### Task Row Layout
-- Task title left-aligned, project name pushed to right side
-
-### Assigned-to-Me Filter
-- "Assigned to me" checkbox on both Overview and Upcoming pages
-- Filter bar visible on Overview (previously hidden)
-- Persists in localStorage
-
-### Templates Page Tabs Spacing
-- Reduced gap between description and tabs
+### UI
+- Task title left-aligned, project name right
+- Assigned-to-me filter on Overview and Upcoming
+- Filter bar visible on Overview
+- Checkbox persistence in localStorage
 
 ---
 
-## Phase 2e: Layout Consistency (2025-02-24)
+## Phase 2e: Layout Consistency (2026-02-24)
 
-### Consistent Page Layouts
-All management pages match the Templates page pattern:
-- `content-widescreen` wrapper (900px centered)
-- `<h2>` heading + grey description paragraph, standardized padding
-
-**Pages updated:** Labels, Teams, Projects, Upcoming, Templates
-
-### Home Page
-- Current Tasks section renders above Last Viewed
-
-### Upcoming Page Improvements
-- Checkbox state persists in localStorage
+### Page Layouts
+- Labels, Teams, Projects, Upcoming, Templates: `content-widescreen` (900px), `<h2>` + description
+- Home: current tasks above last-viewed
+- Upcoming: checkbox state persistence
 
 ---
 
-## Phase 2d: Drag-to-Reorder (2025-02-24)
+## Phase 2d: Drag-to-Reorder (2026-02-24)
 
-### Chain Step Reordering
-- Drag handles with visual reordering via `useDragReorder.ts` composable
+### Chain Steps
+- Drag handles with visual reordering via `useDragReorder.ts`
 
 ---
 
-## Phase 2c: Chain Enhancements (2025-02-24)
+## Phase 2c: Chain Enhancements (2026-02-24)
 
 ### Step Descriptions & Attachments
 - Rich text description per chain step (collapsible)
 - File attachments per step with upload/delete
 
-### Gantt Improvements
+### Gantt
 - Dependency arrows between related tasks
 - Bar tooltips with task details
 
 ---
 
-## Phase 2b: Task Chains (2025-02-24)
+## Phase 2b: Task Chains (2026-02-24)
 
 ### Chain Workflow System
-- Define sequences of tasks with relative timing
-- Create all tasks at once from anchor date
-- Tasks linked via precedes/follows relations
+- Define task sequences with relative timing
+- Create all tasks from anchor date
+- Auto-linked via precedes/follows relations
 
 ---
 
-## Phase 1: Task Templates & Duplication (2025-02-23)
+## Phase 1: Task Templates & Duplication (2026-02-23)
 
 ### Task Templates
-- Save any task as a reusable template
-- Create tasks from templates with project selection
+- Save any task as reusable template
+- Create from template with project selection
 - Template management page at `/templates`
 
 ### Task Duplication
-- Duplicate tasks within the same project
+- Duplicate within same project
+- Preserves labels, assignees, attachments, comments
