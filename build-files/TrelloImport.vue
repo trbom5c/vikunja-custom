@@ -237,7 +237,17 @@
 				</XButton>
 			</div>
 			<div v-if="importLog.length > 0" class="import-log is-complete">
-				<h3>Import Log</h3>
+				<div class="log-header">
+					<h3>Import Log</h3>
+					<div class="log-actions">
+						<button class="log-btn" @click="copyLog" :title="logCopied ? 'Copied!' : 'Copy to clipboard'">
+							{{ logCopied ? '✓ Copied' : '📋 Copy' }}
+						</button>
+						<button class="log-btn" @click="downloadLog" title="Download as text file">
+							💾 Download
+						</button>
+					</div>
+				</div>
 				<div
 					v-for="(entry, i) in importLog"
 					:key="i"
@@ -313,6 +323,47 @@ const options = ref({
 })
 
 const selectedListIds = ref<Set<string>>(new Set())
+const logCopied = ref(false)
+
+// ── Log export helpers ──
+function getLogText(): string {
+	const header = `Trello Import Log — ${new Date().toISOString()}\n` +
+		`Project: ${options.value.projectName}\n` +
+		`Tasks: ${importStats.value.tasks} | Labels: ${importStats.value.labels} | ` +
+		`Dates: ${importStats.value.datesSet} | Done: ${importStats.value.doneCount} | ` +
+		`Buckets: ${importStats.value.buckets} | Errors: ${importStats.value.errors}\n` +
+		'─'.repeat(60) + '\n'
+	return header + importLog.value.map(e => `[${e.type.toUpperCase()}] ${e.message}`).join('\n')
+}
+
+function copyLog() {
+	const text = getLogText()
+	// Use textarea fallback for broad compat (works over HTTP too)
+	const ta = document.createElement('textarea')
+	ta.value = text
+	ta.style.position = 'fixed'
+	ta.style.opacity = '0'
+	document.body.appendChild(ta)
+	ta.focus()
+	ta.select()
+	document.execCommand('copy')
+	document.body.removeChild(ta)
+	logCopied.value = true
+	setTimeout(() => { logCopied.value = false }, 2000)
+}
+
+function downloadLog() {
+	const text = getLogText()
+	const blob = new Blob([text], { type: 'text/plain' })
+	const url = URL.createObjectURL(blob)
+	const a = document.createElement('a')
+	a.href = url
+	a.download = `trello-import-${Date.now()}.log`
+	document.body.appendChild(a)
+	a.click()
+	document.body.removeChild(a)
+	URL.revokeObjectURL(url)
+}
 
 // ── Computed ──
 const allLists = computed(() => {
@@ -1279,6 +1330,53 @@ async function startImport() {
 
 	&.is-complete {
 		max-block-size: 400px;
+	}
+}
+
+.log-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-block-end: 0.5rem;
+	position: sticky;
+	inset-block-start: 0;
+	background: var(--grey-100);
+	padding-block: 0.25rem;
+	z-index: 1;
+
+	h3 {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+}
+
+.log-actions {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.log-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.3rem 0.6rem;
+	border-radius: 5px;
+	border: 1px solid var(--grey-300);
+	background: var(--grey-200);
+	color: var(--text);
+	font-size: 0.75rem;
+	font-family: inherit;
+	cursor: pointer;
+	transition: all 150ms ease;
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--grey-300);
+		border-color: var(--grey-400);
+	}
+
+	&:active {
+		transform: scale(0.96);
 	}
 }
 
