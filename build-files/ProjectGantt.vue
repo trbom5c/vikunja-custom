@@ -8,46 +8,50 @@
 		<template #default>
 			<Card :has-content="false">
 				<div class="gantt-options">
-					<FormField :label="$t('project.gantt.range')">
-						<Foo
-							id="range"
-							ref="flatPickerEl"
-							v-model="flatPickerDateRange"
-							:config="flatPickerConfig"
-							class="input"
-							:placeholder="$t('project.gantt.range')"
+					<div class="gantt-options-row">
+						<FormField :label="$t('project.gantt.range')">
+							<Foo
+								id="range"
+								ref="flatPickerEl"
+								v-model="flatPickerDateRange"
+								:config="flatPickerConfig"
+								class="input"
+								:placeholder="$t('project.gantt.range')"
+							/>
+						</FormField>
+						<FancyCheckbox
+							v-model="filters.showTasksWithoutDates"
+							is-block
+						>
+							{{ $t('task.show.noDates') }}
+						</FancyCheckbox>
+						<FancyCheckbox
+							v-model="filters.showDoneTasks"
+							is-block
+						>
+							{{ $t('task.show.completed') }}
+						</FancyCheckbox>
+					</div>
+					<div class="gantt-options-row">
+						<SubprojectFilter
+							:project-id="filters.projectId"
+							:show-legend="true"
+							@update:includeSubprojects="onSubprojectToggle"
+							@update:excludeProjectIds="onExcludeChange"
+							@update:colorMap="onColorMapChange"
 						/>
-					</FormField>
-					<FancyCheckbox
-						v-model="filters.showTasksWithoutDates"
-						is-block
-					>
-						{{ $t('task.show.noDates') }}
-					</FancyCheckbox>
-					<FancyCheckbox
-						v-model="filters.showDoneTasks"
-						is-block
-					>
-						{{ $t('task.show.completed') }}
-					</FancyCheckbox>
-					<SubprojectFilter
-						:project-id="filters.projectId"
-						:show-legend="true"
-						@update:includeSubprojects="onSubprojectToggle"
-						@update:excludeProjectIds="onExcludeChange"
-						@update:colorMap="onColorMapChange"
-					/>
-					<GanttArrowSettings />
-					<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
-					<XButton
-						v-if="canUndo"
-						variant="tertiary"
-						icon="undo"
-						class="gantt-undo-btn"
-						@click="undoLastAction"
-					>
-						Undo
-					</XButton>
+						<GanttArrowSettings />
+						<XButton
+							v-if="canUndo"
+							variant="tertiary"
+							icon="undo"
+							class="gantt-undo-btn"
+							@click="undoLastAction"
+						>
+							Undo
+						</XButton>
+						<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
+					</div>
 				</div>
 			</Card>
 
@@ -298,11 +302,17 @@ const flatPickerConfig = computed(() => ({
 
 .gantt-options {
 	display: flex;
+	flex-direction: column;
+	gap: .5rem;
+	padding: .5rem .75rem;
+	margin-block-end: 0;
+}
+
+.gantt-options-row {
+	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
 	gap: .5rem .75rem;
-	margin-block-end: 0;
-	padding: .5rem;
 
 	@media screen and (max-width: $tablet) {
 		flex-direction: column;
@@ -322,8 +332,6 @@ const flatPickerConfig = computed(() => ({
 .field {
 	margin-block-end: 0;
 	flex: 0 1 auto;
-	min-inline-size: 180px;
-	max-inline-size: 280px;
 
 	&:not(:last-child) {
 		padding-inline-end: 0;
@@ -332,7 +340,6 @@ const flatPickerConfig = computed(() => ({
 	@media screen and (max-width: $tablet) {
 		inline-size: 100%;
 		max-inline-size: 100%;
-		min-inline-size: unset;
 		margin-block-start: .25rem;
 	}
 
