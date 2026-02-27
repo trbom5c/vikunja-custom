@@ -1008,6 +1008,7 @@ onUnmounted(() => {
 		container.value.removeEventListener('contextmenu', suppressTouchContextMenu)
 		container.value.removeEventListener('touchstart', handleTouchStart as EventListener)
 		container.value.removeEventListener('touchmove', handleTouchMove as EventListener)
+		container.value.removeEventListener('wheel', handleWheel as EventListener)
 	}
 	if (dragMoveHandler) {
 		document.removeEventListener('pointermove', dragMoveHandler)
@@ -1048,10 +1049,21 @@ function handleTouchMove(e: TouchEvent) {
 	}
 }
 
+// Trackpad pinch-to-zoom (browsers fire wheel + ctrlKey for pinch gestures)
+function handleWheel(e: WheelEvent) {
+	if (!e.ctrlKey) return
+	e.preventDefault()
+	const zoomSpeed = 0.5
+	const delta = -e.deltaY * zoomSpeed
+	const newWidth = Math.round(dayWidthPixels.value + delta)
+	dayWidthPixels.value = Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, newWidth))
+}
+
 watch(ganttContainer, (el) => {
 	if (el) {
 		(el as HTMLElement).addEventListener('touchstart', handleTouchStart, {passive: false})
 		;(el as HTMLElement).addEventListener('touchmove', handleTouchMove, {passive: false})
+		;(el as HTMLElement).addEventListener('wheel', handleWheel, {passive: false})
 	}
 }, {immediate: true})
 </script>
