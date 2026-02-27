@@ -183,6 +183,10 @@
 					<strong>{{ importStats.labels }}</strong>
 					<span>labels</span>
 				</div>
+				<div class="complete-stat" v-if="importStats.datesSet > 0">
+					<strong>{{ importStats.datesSet }}</strong>
+					<span>with dates</span>
+				</div>
 			</div>
 			<div v-if="importStats.errors > 0" class="complete-errors">
 				<Message variant="warning">
@@ -218,15 +222,33 @@ import {useProjectStore} from '@/stores/projects'
 import Message from '@/components/misc/Message.vue'
 import XButton from '@/components/input/Button.vue'
 
+// ─────────────────────────────────────────────────────────────
+// We still use ProjectModel/Service, LabelModel/Service, and
+// LabelTaskService for creating projects, labels, and label
+// assignments — those work fine through the standard pipeline.
+//
+// HOWEVER, for TASK CREATION we bypass TaskModel + TaskService
+// entirely and use raw fetch() calls.  This is the fix for the
+// date-dropping bug.
+//
+// Root cause:  TaskModel defaults date fields to `0` (not null).
+// The constructor chain — assignData() → objectToCamelCase →
+// omitBy(isNil) → Object.assign → parseDateOrNull — either
+// loses the Date objects or the beforeCreate() → processModel()
+// → objectToSnakeCase double-transform corrupts them.  The
+// server never sees the dates in the request body.
+//
+// By sending snake_case JSON directly via fetch(), we match the
+// exact format that works from the browser console (verified in
+// DevTools: PUT /api/v1/projects/{id}/tasks returns dates).
+// ─────────────────────────────────────────────────────────────
 import ProjectModel from '@/models/project'
 import LabelModel from '@/models/label'
 import LabelTask from '@/models/labelTask'
-import TaskModel from '@/models/task'
 
 import ProjectService from '@/services/project'
 import LabelService from '@/services/label'
 import LabelTaskService from '@/services/labelTask'
-import TaskService from '@/services/task'
 
 // ── State ──
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -241,7 +263,7 @@ const createdProjectId = ref<number>(0)
 const progressPercent = ref(0)
 const progressText = ref('')
 const importLog = ref<Array<{type: string, message: string}>>([])
-const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0 })
+const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 })
 
 // ── Options ──
 const options = ref({
@@ -344,7 +366,7 @@ function resetImport() {
 	isImporting.value = false
 	importComplete.value = false
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 }
 	progressPercent.value = 0
 	progressText.value = ''
 	parseError.value = ''
@@ -374,16 +396,58 @@ function trelloColorTextColor(color: string): string {
 	return lightColors.includes(color) ? '#172b4d' : '#ffffff'
 }
 
+// ─────────────────────────────────────────────────────────────
+// getAuthToken()
+//
+// Retrieve the JWT bearer token from localStorage.  Vikunja's
+// frontend stores it under the key 'token'.  We need this for
+// raw fetch() calls that bypass the axios interceptor chain.
+// ─────────────────────────────────────────────────────────────
+function getAuthToken(): string {
+	return localStorage.getItem('token') || ''
+}
+
+// ─────────────────────────────────────────────────────────────
+// createTaskRaw()
+//
+// Create a task via raw fetch() to /api/v1/projects/{id}/tasks.
+// This bypasses TaskModel + TaskService entirely to avoid the
+// date-dropping bug in the constructor/interceptor chain.
+//
+// The payload uses snake_case keys matching the Go API directly:
+//   title, description, due_date, start_date, end_date, done,
+//   project_id, bucket_id, position
+//
+// Returns the parsed JSON response (the created task object).
+// ─────────────────────────────────────────────────────────────
+async function createTaskRaw(projectId: number, payload: Record<string, any>): Promise<any> {
+	const token = getAuthToken()
+	const response = await fetch(`/api/v1/projects/${projectId}/tasks`, {
+		method: 'PUT',
+		headers: {
+			'Authorization': 'Bearer ' + token,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(payload),
+	})
+
+	if (!response.ok) {
+		const errBody = await response.text()
+		throw new Error(`HTTP ${response.status}: ${errBody}`)
+	}
+
+	return response.json()
+}
+
 // ── Import Logic ──
 async function startImport() {
 	isImporting.value = true
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0 }
 
 	const projectService = new ProjectService()
 	const labelService = new LabelService()
 	const labelTaskService = new LabelTaskService()
-	const taskService = new TaskService()
 
 	const board = boardData.value
 	const selectedLists = (board.lists || []).filter((l: any) => selectedListIds.value.has(l.id))
@@ -408,7 +472,9 @@ async function startImport() {
 	}
 
 	try {
-		// 1. Create parent project
+		// ─────────────────────────────────────────────────────
+		// PHASE 1: Create parent project
+		// ─────────────────────────────────────────────────────
 		updateProgress('Creating project...')
 		log('info', `Creating project "${options.value.projectName}"`)
 		const parentProject = await projectService.create(new ProjectModel({
@@ -418,7 +484,11 @@ async function startImport() {
 		createdProjectId.value = parentProject.id
 		importStats.value.projects++
 
-		// 2. Create labels (map Trello label ID → Vikunja label ID)
+		// ─────────────────────────────────────────────────────
+		// PHASE 2: Create labels
+		// Map Trello label ID → Vikunja label ID so we can
+		// assign them to tasks after creation.
+		// ─────────────────────────────────────────────────────
 		const labelMap = new Map<string, number>()
 		if (options.value.importLabels) {
 			for (const trelloLabel of boardLabels.value) {
@@ -432,7 +502,7 @@ async function startImport() {
 					importStats.value.labels++
 					log('success', `Label: ${trelloLabel.name}`)
 				} catch (e: any) {
-					// Label might already exist — try to find it
+					// Label might already exist — search and reuse
 					try {
 						const existing = await labelService.getAll({}, {s: trelloLabel.name})
 						const match = existing.find((l: any) => l.title === trelloLabel.name)
@@ -450,7 +520,10 @@ async function startImport() {
 			}
 		}
 
-		// 3. Create sub-projects for each list (or use parent)
+		// ─────────────────────────────────────────────────────
+		// PHASE 3: Create sub-projects for each Trello list
+		// Maps Trello list ID → Vikunja project ID.
+		// ─────────────────────────────────────────────────────
 		const listProjectMap = new Map<string, number>()
 		if (options.value.listsAsSubProjects) {
 			for (const list of selectedLists) {
@@ -478,7 +551,11 @@ async function startImport() {
 			}
 		}
 
-		// 4. Build checklist map (card ID → checklists)
+		// ─────────────────────────────────────────────────────
+		// PHASE 4: Build checklist lookup
+		// Trello checklists are separate objects referencing
+		// the card by idCard.  Group them for fast lookup.
+		// ─────────────────────────────────────────────────────
 		const checklistMap = new Map<string, any[]>()
 		if (options.value.importChecklists) {
 			for (const cl of (board.checklists || [])) {
@@ -488,8 +565,19 @@ async function startImport() {
 			}
 		}
 
-		// 5. Import cards as tasks
-		// Sort by position within each list
+		// ─────────────────────────────────────────────────────
+		// PHASE 5: Import cards as tasks
+		//
+		// KEY FIX: We use createTaskRaw() — a direct fetch()
+		// to the Vikunja API — instead of going through
+		// TaskModel + TaskService.  This ensures date fields
+		// (due_date, start_date, end_date) arrive at the
+		// server in the exact snake_case ISO format it expects.
+		//
+		// The TaskModel constructor pipeline was dropping dates
+		// because of its `0` defaults + the parseDateOrNull /
+		// objectToSnakeCase double-transform chain.
+		// ─────────────────────────────────────────────────────
 		const sortedCards = [...cards].sort((a: any, b: any) => (a.pos || 0) - (b.pos || 0))
 
 		for (const card of sortedCards) {
@@ -497,7 +585,7 @@ async function startImport() {
 			updateProgress(`Importing "${card.name?.substring(0, 40)}..."`)
 
 			try {
-				// Build description
+				// ── Build description ──
 				let description = card.desc || ''
 
 				// Append checklists as markdown
@@ -525,43 +613,60 @@ async function startImport() {
 					}
 				}
 
-				const taskData: Record<string, any> = {
+				// ── Build the snake_case payload for the API ──
+				// This goes directly to PUT /api/v1/projects/{id}/tasks
+				// without any TaskModel constructor or service interceptor.
+				const payload: Record<string, any> = {
 					title: card.name,
 					description: description.trim(),
-					projectId,
 					done: false,
 				}
 
-				// Due date
+				// ── Date mapping ──
+				// Trello card.due and card.start are ISO 8601 strings
+				// like "2025-10-28T00:00:00.000Z".  We convert to Date
+				// then back to ISO to normalize, and send as snake_case.
+				let hasAnyDate = false
+
 				if (card.due) {
-					taskData.dueDate = new Date(card.due)
+					payload.due_date = new Date(card.due).toISOString()
+					hasAnyDate = true
 				}
 
-				// Start date + End date for gantt bar positioning
 				if (card.start && card.due) {
-					// Has both start and due → full range bar
-					taskData.startDate = new Date(card.start)
-					taskData.endDate = new Date(card.due)
+					// Card has both start and due → full gantt bar range
+					payload.start_date = new Date(card.start).toISOString()
+					payload.end_date = new Date(card.due).toISOString()
 				} else if (card.start && !card.due) {
-					// Start only → single-day bar at start
-					taskData.startDate = new Date(card.start)
-					taskData.endDate = new Date(card.start)
+					// Start only → single-day bar at the start date
+					payload.start_date = new Date(card.start).toISOString()
+					payload.end_date = new Date(card.start).toISOString()
 				} else if (!card.start && card.due) {
-					// Due only → single-day bar at due date
-					taskData.startDate = new Date(card.due)
-					taskData.endDate = new Date(card.due)
+					// Due only → single-day bar at the due date
+					payload.start_date = new Date(card.due).toISOString()
+					payload.end_date = new Date(card.due).toISOString()
 				}
 
-				// Mark done
+				if (card.start) hasAnyDate = true
+
+				// ── Done status ──
 				if (card.closed) {
-					taskData.done = true
+					payload.done = true
 				} else if (options.value.markDueCompleteAsDone && card.dueComplete) {
-					taskData.done = true
+					payload.done = true
 				}
 
-				const task = await taskService.create(new TaskModel(taskData))
+				// ── Create the task via raw fetch ──
+				const task = await createTaskRaw(projectId, payload)
 
-				// Assign labels
+				// Track date stats
+				if (hasAnyDate) {
+					importStats.value.datesSet++
+				}
+
+				// ── Assign labels ──
+				// Label assignment still uses the standard service
+				// since it doesn't have the same date issue.
 				if (options.value.importLabels && card.idLabels?.length > 0) {
 					for (const trelloLabelId of card.idLabels) {
 						const vikunjaLabelId = labelMap.get(trelloLabelId)
@@ -572,7 +677,7 @@ async function startImport() {
 									labelId: vikunjaLabelId,
 								}))
 							} catch {
-								// Label assignment might fail silently
+								// Label assignment might fail silently (duplicate, etc.)
 							}
 						}
 					}
@@ -585,12 +690,14 @@ async function startImport() {
 			}
 		}
 
-		// Refresh project store
+		// ─────────────────────────────────────────────────────
+		// PHASE 6: Refresh and finish
+		// ─────────────────────────────────────────────────────
 		const projectStore = useProjectStore()
 		await projectStore.loadAllProjects()
 
 		progressPercent.value = 100
-		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects.`)
+		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates).`)
 
 	} catch (e: any) {
 		log('error', `Import failed: ${e?.message || e}`)
