@@ -285,6 +285,8 @@ const cascadeStyle = ref<'toast' | 'modal'>((() => {
 
 watch(cascadeStyle, (val) => {
 	try { localStorage.setItem(CASCADE_PREF_KEY, val) } catch {}
+	statusMsg.value = 'Saved'
+	setTimeout(() => statusMsg.value = '', 1500)
 })
 
 // Cascade mode: bulk (all at once) or individual (one by one)
@@ -299,6 +301,8 @@ const cascadeMode = ref<'bulk' | 'individual'>((() => {
 
 watch(cascadeMode, (val) => {
 	try { localStorage.setItem(CASCADE_MODE_KEY, val) } catch {}
+	statusMsg.value = 'Saved'
+	setTimeout(() => statusMsg.value = '', 1500)
 })
 
 function copyConfig() {

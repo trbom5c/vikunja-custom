@@ -69,9 +69,9 @@
 			</GanttChartBody>
 		</div>
 
-		<!-- Drag confirm bubble (fixed, rAF-tracks bar element) -->
+		<!-- Drag confirm scrim (move phase only — cascade has no blocking scrim) -->
 		<div
-			v-if="dragConfirm"
+			v-if="dragConfirm && dragConfirm.phase === 'move'"
 			class="drag-confirm-scrim"
 			@click="cancelDrag"
 		/>
@@ -89,16 +89,16 @@
 				<template v-if="dragConfirm.phase === 'move'">
 					<span class="drag-confirm-label">{{ dragConfirm.taskName }}</span>
 					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmDrag">✓</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
+					<button class="drag-confirm-btn confirm" title="Confirm move" @click="confirmDrag">✓</button>
+					<button class="drag-confirm-btn cancel" title="Cancel move" @click="cancelDrag">✕</button>
 				</template>
 				<!-- Cascade phase (bulk) -->
 				<template v-else-if="dragConfirm.phase === 'cascade' && !dragConfirm.isIndividual">
 					<span class="drag-confirm-cascade-icon" :style="{color: dragConfirm.cascadeAccentColor || '#7e7'}">↓</span>
 					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
 					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmCascadeAll">✓ All</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
+					<button class="drag-confirm-btn confirm" title="Shift all downstream tasks" @click="confirmCascadeAll">✓ All</button>
+					<button class="drag-confirm-btn cancel" title="Skip cascade" @click="cancelDrag">✕</button>
 				</template>
 				<!-- Cascade phase (individual) -->
 				<template v-else-if="dragConfirm.phase === 'cascade' && dragConfirm.isIndividual">
@@ -106,9 +106,9 @@
 					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
 					<span class="drag-confirm-step">{{ dragConfirm.cascadeNames }}</span>
 					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmCascadeIndividual">✓</button>
-					<button class="drag-confirm-btn skip" @click="skipCascadeIndividual">→</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
+					<button class="drag-confirm-btn confirm" title="Shift this task" @click="confirmCascadeIndividual">✓</button>
+					<button class="drag-confirm-btn skip" title="Skip this task" @click="skipCascadeIndividual">→</button>
+					<button class="drag-confirm-btn cancel" title="Cancel all remaining" @click="cancelDrag">✕</button>
 				</template>
 			</div>
 		</Transition>
