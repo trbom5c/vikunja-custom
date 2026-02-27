@@ -8,6 +8,7 @@
 #   .\vikunja-build.ps1 -Release                 (commit + push + build + GitHub release)
 #   .\vikunja-build.ps1 -Deploy                  (+ deploy after build)
 #   .\vikunja-build.ps1 -Release -Deploy         (the works)
+#   .\vikunja-build.ps1 -Release -TagLatest      (release + push 'latest' tag to all repos)
 #   .\vikunja-build.ps1 -CommitMsg "my message"  (custom commit message)
 #   .\vikunja-build.ps1 -NoBuild                 (skip Docker build, test git/release/deploy)
 #   .\vikunja-build.ps1 -Force                   (rebuild even if no files changed)
@@ -32,7 +33,8 @@ param(
     [switch]$SkipExtract,
     [switch]$Setup,
     [switch]$ShowConfig,
-    [switch]$WipeConfig
+    [switch]$WipeConfig,
+    [switch]$TagLatest
 )
 
 # -Push implies -Commit (can't push without committing)
@@ -41,6 +43,8 @@ if ($Push) { $Commit = $true }
 if ($CommitMsg) { $Commit = $true }
 # -Release implies -Commit -Push (need a pushed tag for the release)
 if ($Release) { $Commit = $true; $Push = $true }
+# -TagLatest implies -Release (latest tag only makes sense with a release)
+if ($TagLatest) { $Release = $true; $Commit = $true; $Push = $true }
 
 $ErrorActionPreference = "Stop"
 $PROJ        = $PSScriptRoot
@@ -937,6 +941,38 @@ if ($Release) {
 
         if ($releaseTargets.Count -eq 0) {
             Write-Host "  No release repos configured. Run -Setup to add them." -ForegroundColor Yellow
+        }
+
+        # ── Push 'latest' tag to all repos (opt-in with -TagLatest) ──
+        if ($TagLatest -and $releaseTargets.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  Tagging 'latest' on all repos..." -ForegroundColor Cyan
+
+            for ($ri = 0; $ri -lt $releaseTargets.Count; $ri++) {
+                $target = $releaseTargets[$ri]
+
+                if ($target.tagFrom -eq "fork") {
+                    # Tag in the fork source repo
+                    Set-Location $SOURCE
+                    $existingUrl = (git remote get-url fork 2>&1) | Out-String
+                    if ($LASTEXITCODE -ne 0) {
+                        git remote add fork $PUSH_URL 2>&1 | Out-Null
+                    }
+                    git tag -f latest 2>&1 | Out-Null
+                    git push fork latest --force 2>&1 | Out-Null
+                    Set-Location $PROJ
+                } else {
+                    # Tag in the build-tools/project repo
+                    git tag -f latest 2>&1 | Out-Null
+                    git push origin latest --force 2>&1 | Out-Null
+                }
+
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  $($target.name): latest tag pushed OK" -ForegroundColor Green
+                } else {
+                    Write-Host "  $($target.name): latest tag push failed" -ForegroundColor DarkYellow
+                }
+            }
         }
 
         $ErrorActionPreference = $oldEAP
