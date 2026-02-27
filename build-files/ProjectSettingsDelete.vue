@@ -3,36 +3,12 @@
 		@close="!isDeleting && $router.back()"
 		@submit="deleteProject()"
 	>
-		<template #header>
-			<span>{{ $t('project.delete.header') }}</span>
-		</template>
-
-		<template #text>
-			<!-- Normal confirmation state -->
-			<template v-if="!isDeleting">
-				<p>
-					{{ $t('project.delete.text1') }}
-				</p>
-
-				<p
-					v-if="totalTasks !== null"
-					class="has-text-weight-bold"
-				>
-					{{ deleteNotice }}
-				</p>
-				<Loading
-					v-else
-					class="is-loading-small"
-					variant="default"
-				/>
-
-				<p>
-					{{ $t('misc.cannotBeUndone') }}
-				</p>
-			</template>
-
-			<!-- Deleting in progress -->
-			<template v-else>
+		<!-- When deleting: use the default slot to take full control, hiding the action buttons -->
+		<template v-if="isDeleting" #default>
+			<div class="modal-header">
+				<span>{{ $t('project.delete.header') }}</span>
+			</div>
+			<div class="content">
 				<div class="deleting-progress">
 					<Loading class="is-loading" variant="default" />
 					<p class="deleting-text">
@@ -42,7 +18,34 @@
 						This may take a moment for large projects.
 					</p>
 				</div>
-			</template>
+			</div>
+		</template>
+
+		<!-- Normal state: use named slots so Modal renders its own Cancel/DO IT buttons -->
+		<template v-if="!isDeleting" #header>
+			<span>{{ $t('project.delete.header') }}</span>
+		</template>
+
+		<template v-if="!isDeleting" #text>
+			<p>
+				{{ $t('project.delete.text1') }}
+			</p>
+
+			<p
+				v-if="totalTasks !== null"
+				class="has-text-weight-bold"
+			>
+				{{ deleteNotice }}
+			</p>
+			<Loading
+				v-else
+				class="is-loading-small"
+				variant="default"
+			/>
+
+			<p>
+				{{ $t('misc.cannotBeUndone') }}
+			</p>
 		</template>
 	</Modal>
 </template>
