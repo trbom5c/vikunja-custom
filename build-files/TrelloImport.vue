@@ -782,34 +782,32 @@ async function startImport() {
 		let parentKanbanViewId: number | null = null
 
 		if (options.value.kanbanMode !== 'none') {
-			// ── Discover Kanban info for all subprojects (simple assignment) ──
-			const allProjectIds = new Set<number>()
-			for (const pid of listProjectMap.values()) {
-				allProjectIds.add(pid)
-			}
-			// Also add parent if not using replicate (or as fallback)
+			// ── Simple mode: discover Kanban info for all target projects ──
 			if (options.value.kanbanMode === 'simple') {
+				const allProjectIds = new Set<number>()
+				for (const pid of listProjectMap.values()) {
+					allProjectIds.add(pid)
+				}
 				allProjectIds.add(parentProject.id)
-			}
 
-			for (const pid of allProjectIds) {
-				const kanbanViewId = await getProjectKanbanViewId(pid)
-				if (!kanbanViewId) continue
-				const buckets = await getBucketsByView(pid, kanbanViewId)
-				if (buckets.length === 0) continue
+				for (const pid of allProjectIds) {
+					const kanbanViewId = await getProjectKanbanViewId(pid)
+					if (!kanbanViewId) continue
+					const buckets = await getBucketsByView(pid, kanbanViewId)
+					if (buckets.length === 0) continue
 
-				// Find To-Do bucket (first by position) and Done bucket (last, or by checkmark title)
-				const todoBucket = buckets[0]
-				const doneBucket = buckets.find(b =>
-					b.title.toLowerCase() === 'done'
-				) || buckets[buckets.length - 1]
+					const todoBucket = buckets[0]
+					const doneBucket = buckets.find(b =>
+						b.title.toLowerCase() === 'done'
+					) || buckets[buckets.length - 1]
 
-				projectKanbanSimple.set(pid, {
-					viewId: kanbanViewId,
-					todoBucketId: todoBucket.id,
-					doneBucketId: doneBucket.id,
-				})
-				log('info', `Kanban ready for project ${pid} — To-Do: "${todoBucket.title}", Done: "${doneBucket.title}"`)
+					projectKanbanSimple.set(pid, {
+						viewId: kanbanViewId,
+						todoBucketId: todoBucket.id,
+						doneBucketId: doneBucket.id,
+					})
+					log('info', `Kanban ready for project ${pid} — To-Do: "${todoBucket.title}", Done: "${doneBucket.title}"`)
+				}
 			}
 
 			// ── Replicate mode: set up parent project Kanban ──
@@ -831,7 +829,7 @@ async function startImport() {
 						if (bucketId) {
 							trelloListBucketMap.set(list.id, bucketId)
 							importStats.value.buckets++
-							log('success', `Kanban column: ${list.name}`)
+							log('success', `Kanban column: ${list.name} (listId=${list.id}, bucketId=${bucketId})`)
 						} else {
 							log('error', `Failed to create Kanban column "${list.name}"`)
 							importStats.value.errors++
@@ -840,7 +838,6 @@ async function startImport() {
 					}
 
 					// Remove the default buckets (To-Do, Doing, Done) since we've replaced them.
-					// Only delete if we successfully created at least one custom bucket.
 					if (trelloListBucketMap.size > 0) {
 						for (const oldBucket of existingBuckets) {
 							await deleteBucketRaw(parentProject.id, parentKanbanViewId, oldBucket.id)
@@ -981,16 +978,21 @@ async function startImport() {
 							const listBucketId = trelloListBucketMap.get(card.idList)
 							if (listBucketId) {
 								await assignTaskToBucket(parentProject.id, parentKanbanViewId, listBucketId, task.id)
+							} else {
+								log('error', `No bucket mapped for list "${card.idList}" — task "${card.name}"`)
 							}
 						}
 
-						// Simple mode (always runs for subproject Kanban, even in replicate mode)
-						const simpleInfo = projectKanbanSimple.get(projectId)
-						if (simpleInfo) {
-							const targetBucket = payload.done
-								? simpleInfo.doneBucketId
-								: simpleInfo.todoBucketId
-							await assignTaskToBucket(projectId, simpleInfo.viewId, targetBucket, task.id)
+						// Simple mode: assign to To-Do or Done bucket on the task's project
+						// Skip in replicate mode — replicate handles bucket assignment above
+						if (options.value.kanbanMode === 'simple') {
+							const simpleInfo = projectKanbanSimple.get(projectId)
+							if (simpleInfo) {
+								const targetBucket = payload.done
+									? simpleInfo.doneBucketId
+									: simpleInfo.todoBucketId
+								await assignTaskToBucket(projectId, simpleInfo.viewId, targetBucket, task.id)
+							}
 						}
 					} catch (bucketErr: any) {
 						log('error', `Bucket assign failed for "${card.name}": ${bucketErr?.message || bucketErr}`)
