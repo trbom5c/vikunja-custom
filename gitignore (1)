@@ -1,0 +1,20 @@
+# User-specific config (contains SSH paths, server IPs, URLs)
+build-config.json
+
+# Build state
+.last-build-hash
+
+# Build outputs
+builds-tar/
+*.tar
+
+# Staging
+downloads/
+
+# Cloned source (rebuilt every run)
+vikunja-src/
+
+# OS junk
+Thumbs.db
+.DS_Store
+desktop.ini

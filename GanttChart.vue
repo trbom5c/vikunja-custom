@@ -68,52 +68,9 @@
 				</template>
 			</GanttChartBody>
 		</div>
-
-		<!-- Drag confirm bubble (fixed, rAF-tracks bar element) -->
-		<div
-			v-if="dragConfirm"
-			class="drag-confirm-scrim"
-			@click="cancelDrag"
-		/>
-		<Transition name="bubble">
-			<div
-				v-if="dragConfirm"
-				class="drag-confirm-bubble"
-				:style="{
-					left: bubbleX + 'px',
-					top: bubbleY + 'px',
-				}"
-				:class="{ 'cascade-phase': dragConfirm.phase === 'cascade' }"
-			>
-				<!-- Move phase -->
-				<template v-if="dragConfirm.phase === 'move'">
-					<span class="drag-confirm-label">{{ dragConfirm.taskName }}</span>
-					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmDrag">✓</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
-				</template>
-				<!-- Cascade phase (bulk) -->
-				<template v-else-if="dragConfirm.phase === 'cascade' && !dragConfirm.isIndividual">
-					<span class="drag-confirm-cascade-icon" :style="{color: dragConfirm.cascadeAccentColor || '#7e7'}">↓</span>
-					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
-					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmCascadeAll">✓ All</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
-				</template>
-				<!-- Cascade phase (individual) -->
-				<template v-else-if="dragConfirm.phase === 'cascade' && dragConfirm.isIndividual">
-					<span class="drag-confirm-cascade-icon" :style="{color: dragConfirm.cascadeAccentColor || '#7e7'}">↓</span>
-					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
-					<span class="drag-confirm-step">{{ dragConfirm.cascadeNames }}</span>
-					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
-					<button class="drag-confirm-btn confirm" @click="confirmCascadeIndividual">✓</button>
-					<button class="drag-confirm-btn skip" @click="skipCascadeIndividual">→</button>
-					<button class="drag-confirm-btn cancel" @click="cancelDrag">✕</button>
-				</template>
-			</div>
-		</Transition>
 	</div>
 </template>
+
 <script setup lang="ts">
 import {computed, ref, watch, toRefs, onUnmounted} from 'vue'
 import {useRouter} from 'vue-router'
@@ -146,7 +103,7 @@ const props = withDefaults(defineProps<{
 	defaultTaskStartDate: DateISO
 	defaultTaskEndDate: DateISO
 	subprojectColorMap?: Map<number, string>
-	cascadePreviews?: Array<{id: string, taskIds: Set<number>, deltaDays: number, direction: string, accentColor?: string}>
+	cascadePreviews?: Array<{taskIds: Set<number>, deltaDays: number, direction: string, accentColor?: string}>
 }>(), {
 	subprojectColorMap: () => new Map(),
 	cascadePreviews: () => [],
@@ -189,158 +146,12 @@ const dragState = ref<{
 let dragMoveHandler: ((e: PointerEvent) => void) | null = null
 let dragStopHandler: (() => void) | null = null
 
-// Drag confirm bubble — live-tracks bar position via rAF
-const dragConfirm = ref<{
-	barId: string
-	taskName: string
-	absDays: number
-	direction: string
-	originalStart: Date
-	originalEnd: Date
-	currentDays: number
-	phase: 'move' | 'cascade'
-	cascadeLabel?: string
-	cascadeNames?: string
-	cascadeAction?: () => void
-	cascadeSkip?: () => void
-	cascadeDismiss?: () => void
-	cascadeAccentColor?: string
-	isIndividual?: boolean
-	stepIndex?: number
-	stepTotal?: number
-} | null>(null)
-
-// Live position updated by rAF loop
-const bubbleX = ref(0)
-const bubbleY = ref(0)
-let bubbleRafId: number | null = null
-
-function updateBubblePosition() {
-	if (!dragConfirm.value) {
-		bubbleRafId = null
-		return
-	}
-	const container = ganttContainer.value as HTMLElement | null
-	if (container) {
-		const barEl = container.querySelector(`[data-task-id="${dragConfirm.value.barId}"]`)
-		if (barEl) {
-			const rect = barEl.getBoundingClientRect()
-			bubbleX.value = rect.left + rect.width / 2
-			bubbleY.value = rect.top - 8
-		}
-	}
-	bubbleRafId = requestAnimationFrame(updateBubblePosition)
-}
-
-watch(dragConfirm, (val) => {
-	if (val && !bubbleRafId) {
-		bubbleRafId = requestAnimationFrame(updateBubblePosition)
-	} else if (!val && bubbleRafId) {
-		cancelAnimationFrame(bubbleRafId)
-		bubbleRafId = null
-	}
-})
-
-onUnmounted(() => {
-	if (bubbleRafId) cancelAnimationFrame(bubbleRafId)
-})
-
-function confirmDrag() {
-	if (!dragConfirm.value) return
-
-	if (dragConfirm.value.phase === 'move') {
-		const {originalStart, originalEnd, currentDays, barId} = dragConfirm.value
-		const newStart = new Date(originalStart)
-		newStart.setDate(newStart.getDate() + currentDays)
-		const newEnd = new Date(originalEnd)
-		newEnd.setDate(newEnd.getDate() + currentDays)
-		updateGanttTask(barId, newStart, newEnd)
-		// Close bubble — cascade toast will appear separately
-		dragConfirm.value = null
-		isDragging.value = false
-		dragState.value = null
-	} else if (dragConfirm.value.phase === 'cascade') {
-		if (dragConfirm.value.cascadeAction) {
-			dragConfirm.value.cascadeAction()
-		}
-		dragConfirm.value = null
-	}
-}
-
-function confirmCascadeAll() {
-	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
-	if (dragConfirm.value.cascadeAction) {
-		dragConfirm.value.cascadeAction()
-	}
-	dragConfirm.value = null
-}
-
-function cancelDrag() {
-	if (dragConfirm.value?.phase === 'cascade') {
-		// Skip cascade — clean up ghost previews, then close
-		if (dragConfirm.value.cascadeDismiss) {
-			dragConfirm.value.cascadeDismiss()
-		}
-		dragConfirm.value = null
-	} else {
-		// Cancel move — snap bar back
-		dragConfirm.value = null
-		isDragging.value = false
-		dragState.value = null
-	}
-}
-
-// Expose function for composable to push cascade into the bubble
-function showCascadeInBubble(info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) {
-	const targetBarId = info.barId || dragConfirm.value?.barId || ''
-	const isIndividual = info.stepIndex !== undefined && info.stepTotal !== undefined
-
-	dragConfirm.value = {
-		barId: targetBarId,
-		taskName: info.names,
-		absDays: info.absDays,
-		direction: info.direction,
-		originalStart: new Date(),
-		originalEnd: new Date(),
-		currentDays: 0,
-		phase: 'cascade',
-		cascadeLabel: info.label,
-		cascadeNames: info.names,
-		cascadeAccentColor: info.accentColor,
-		cascadeAction: info.action,
-		cascadeSkip: info.skip,
-		cascadeDismiss: info.dismiss,
-		isIndividual,
-		stepIndex: info.stepIndex,
-		stepTotal: info.stepTotal,
-	}
-}
-
-function confirmCascadeIndividual() {
-	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
-	if (dragConfirm.value.cascadeAction) {
-		dragConfirm.value.cascadeAction()
-	}
-	// Don't close bubble — action callback will call promptNext() which re-calls showCascadeInBubble
-}
-
-function skipCascadeIndividual() {
-	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
-	if (dragConfirm.value.cascadeSkip) {
-		dragConfirm.value.cascadeSkip()
-	}
-	// Don't close bubble — skip callback will call promptNext() which re-calls showCascadeInBubble
-}
-
-// Expose to parent for composable access
-defineExpose({showCascadeInBubble})
-
 const dateFromDate = computed(() => dayjs(filters.value.dateFrom).startOf('day').toDate())
 const dateToDate = computed(() => dayjs(filters.value.dateTo).endOf('day').toDate())
 
 const totalWidth = computed(() => {
 	const dateDiff = Math.ceil((dateToDate.value.valueOf() - dateFromDate.value.valueOf()) / MILLISECONDS_A_DAY)
-	return dateDiff * DAY_WIDTH_PIXELS.value
+	return dateDiff * DAY_WIDTH_PIXELS
 })
 
 const timelineData = computed(() => {
@@ -499,83 +310,58 @@ watch(
 )
 
 // Cascade preview: pulse affected bars and show ghost bars at shifted positions
-const activePreviewIds = ref<Set<string>>(new Set())
-
 watch(
 	() => props.cascadePreviews,
 	(previews) => {
 		const container = ganttContainer.value as HTMLElement | null
 		if (!container) return
 
-		const currentIds = new Set((previews || []).map(p => p.id))
+		// Clean up all previous ghosts and pulses
+		container.querySelectorAll('.cascade-ghost').forEach(el => el.remove())
+		container.querySelectorAll('.cascade-pulse').forEach(el => {
+			el.classList.remove('cascade-pulse')
+			el.removeAttribute('data-cascade-color')
+		})
 
-		// Remove ghosts and pulses for previews that are no longer active
-		for (const oldId of activePreviewIds.value) {
-			if (!currentIds.has(oldId)) {
-				container.querySelectorAll(`[data-preview-id="${oldId}"]`).forEach(el => el.remove())
-				container.querySelectorAll(`[data-pulse-id="${oldId}"]`).forEach(el => {
-					el.classList.remove('cascade-pulse')
-					el.removeAttribute('data-pulse-id')
-					el.style.removeProperty('--cascade-glow')
-				})
-			}
-		}
+		if (!previews || previews.length === 0) return
 
-		// Add ghosts for new previews
-		const idsToAdd = new Set<string>()
-		for (const preview of (previews || [])) {
-			if (!activePreviewIds.value.has(preview.id)) {
-				idsToAdd.add(preview.id)
-			}
-		}
+		requestAnimationFrame(() => {
+			for (const preview of previews) {
+				const {taskIds, deltaDays, accentColor} = preview
+				const deltaPixels = deltaDays * DAY_WIDTH_PIXELS
+				const strokeColor = accentColor || '#ffffff'
 
-		// Update tracking immediately for removal, defer addition until rendered
-		activePreviewIds.value = currentIds
+				for (const taskId of taskIds) {
+					const barRect = container.querySelector(`[data-task-id="${taskId}"]`) as SVGRectElement | null
+					if (!barRect) continue
 
-		if (idsToAdd.size > 0) {
-			requestAnimationFrame(() => {
-				for (const preview of (previews || [])) {
-					if (!idsToAdd.has(preview.id)) continue
-
-					const {id, taskIds, deltaDays, accentColor} = preview
-					const deltaPixels = deltaDays * DAY_WIDTH_PIXELS.value
-					const strokeColor = accentColor || '#ffffff'
-
-					for (const taskId of taskIds) {
-						const barRect = container.querySelector(`[data-task-id="${taskId}"]`) as SVGRectElement | null
-						if (!barRect) continue
-
-						// Pulse the original bar
-						barRect.classList.add('cascade-pulse')
-						barRect.setAttribute('data-pulse-id', id)
-						if (accentColor) {
-							barRect.style.setProperty('--cascade-glow', accentColor)
-						}
-
-						// Create ghost rect
-						const svg = barRect.closest('svg')
-						if (!svg) continue
-
-						const ghost = barRect.cloneNode(true) as SVGRectElement
-						ghost.classList.add('cascade-ghost')
-						ghost.classList.remove('cascade-pulse')
-						ghost.removeAttribute('data-task-id')
-						ghost.removeAttribute('data-pulse-id')
-						ghost.setAttribute('data-preview-id', id)
-						ghost.style.pointerEvents = 'none'
-
-						const currentX = parseFloat(ghost.getAttribute('x') || '0')
-						ghost.setAttribute('x', String(currentX + deltaPixels))
-						ghost.setAttribute('opacity', '0.3')
-						ghost.setAttribute('stroke', strokeColor)
-						ghost.setAttribute('stroke-width', '2')
-						ghost.setAttribute('stroke-dasharray', '4,3')
-
-						svg.appendChild(ghost)
+					// Pulse the original bar with accent color glow
+					barRect.classList.add('cascade-pulse')
+					if (accentColor) {
+						barRect.style.setProperty('--cascade-glow', accentColor)
 					}
+
+					// Create ghost rect in the same SVG
+					const svg = barRect.closest('svg')
+					if (!svg) continue
+
+					const ghost = barRect.cloneNode(true) as SVGRectElement
+					ghost.classList.add('cascade-ghost')
+					ghost.classList.remove('cascade-pulse')
+					ghost.removeAttribute('data-task-id')
+					ghost.style.pointerEvents = 'none'
+
+					const currentX = parseFloat(ghost.getAttribute('x') || '0')
+					ghost.setAttribute('x', String(currentX + deltaPixels))
+					ghost.setAttribute('opacity', '0.3')
+					ghost.setAttribute('stroke', strokeColor)
+					ghost.setAttribute('stroke-width', '2')
+					ghost.setAttribute('stroke-dasharray', '4,3')
+
+					svg.appendChild(ghost)
 				}
-			})
-		}
+			}
+		})
 	},
 	{deep: true},
 )
@@ -644,7 +430,7 @@ function isTouchEvent(e: PointerEvent): boolean {
 function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	const isTouch = isTouchEvent(event)
 
-	// Only preventDefault immediately for mouse — touch uses separate handler
+	// Only preventDefault immediately for mouse — touch needs native scroll to work
 	if (!isTouch) {
 		event.preventDefault()
 	}
@@ -671,71 +457,73 @@ function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	const threshold = isTouch ? TOUCH_DRAG_THRESHOLD_PIXELS : DRAG_THRESHOLD_PIXELS
 
 	if (isTouch) {
-		// Touch drag: use native Touch events for reliable scroll prevention.
-		// PointerEvents get cancelled by the browser once scrolling starts,
-		// but TouchEvents with preventDefault() in a non-passive handler block scroll.
+		// Touch: require a long-press hold before drag activates
 		let holdConfirmed = false
 		let cancelled = false
-		const targetEl = event.target as Element
+		const pointerId = event.pointerId
 
 		const holdTimer = setTimeout(() => {
 			if (!cancelled) {
 				holdConfirmed = true
-				const barEl = targetEl.closest('g')
+				// Capture pointer to prevent browser scroll takeover
+				try {
+					(event.target as Element)?.setPointerCapture(pointerId)
+				} catch {}
+				// Provide haptic-like feedback via class
+				const barEl = (event.target as Element)?.closest('g')
 				barEl?.classList.add('gantt-bar-held')
 			}
 		}, TOUCH_HOLD_MS)
 
-		const handleTouchMoveForDrag = (e: TouchEvent) => {
-			const touch = e.touches[0]
-			if (!touch) return
+		const handleMove = (e: PointerEvent) => {
+			if (holdConfirmed) {
+				// Prevent scrolling once hold is confirmed
+				e.preventDefault()
+			}
 
-			const diffX = Math.abs(touch.clientX - startX)
-			const diffY = Math.abs(touch.clientY - startY)
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
 
 			if (!holdConfirmed) {
+				// Finger moved before hold timer — cancel, let browser scroll
 				if (diffX > threshold || diffY > threshold) {
 					cancelled = true
 					clearTimeout(holdTimer)
-					cleanupTouch()
+					cleanup()
 				}
 				return
 			}
 
-			// Hold confirmed — block scrolling
-			e.preventDefault()
-
+			// Hold confirmed — now check drag threshold from hold point
 			if (!dragStarted && (diffX > threshold || diffY > threshold)) {
 				dragStarted = true
-				cleanupTouch()
-				// Create a synthetic PointerEvent-like object for startDrag
-				startDrag(bar, {
-					clientX: touch.clientX,
-					clientY: touch.clientY,
-					preventDefault: () => {},
-					target: targetEl,
-				} as unknown as PointerEvent)
+				cleanup()
+				startDrag(bar, e)
 			}
 		}
 
-		const handleTouchEndForDrag = () => {
+		const handleStop = () => {
 			cancelled = true
 			clearTimeout(holdTimer)
-			cleanupTouch()
-			const barEl = targetEl.closest('g')
+			// Release pointer capture
+			try {
+				(event.target as Element)?.releasePointerCapture(pointerId)
+			} catch {}
+			cleanup()
+			// Remove held visual
+			const barEl = (event.target as Element)?.closest('g')
 			barEl?.classList.remove('gantt-bar-held')
 		}
 
-		const cleanupTouch = () => {
-			document.removeEventListener('touchmove', handleTouchMoveForDrag)
-			document.removeEventListener('touchend', handleTouchEndForDrag)
-			document.removeEventListener('touchcancel', handleTouchEndForDrag)
+		const cleanup = () => {
+			document.removeEventListener('pointermove', handleMove)
+			document.removeEventListener('pointerup', handleStop)
+			document.removeEventListener('pointercancel', handleStop)
 		}
 
-		// CRITICAL: {passive: false} allows preventDefault in touchmove
-		document.addEventListener('touchmove', handleTouchMoveForDrag, {passive: false})
-		document.addEventListener('touchend', handleTouchEndForDrag)
-		document.addEventListener('touchcancel', handleTouchEndForDrag)
+		document.addEventListener('pointermove', handleMove, {passive: false})
+		document.addEventListener('pointerup', handleStop)
+		document.addEventListener('pointercancel', handleStop)
 	} else {
 		// Mouse: immediate drag on threshold
 		const handleMove = (e: PointerEvent) => {
@@ -775,8 +563,10 @@ function clearCursor(barElement?: Element | null) {
 }
 
 function startDrag(bar: GanttBarModel, event: PointerEvent) {
+	// Now that drag is confirmed, prevent default to stop scrolling
 	event.preventDefault()
 
+	// Don't allow dragging overdue clamped bars
 	if (bar.meta?.isOverdue) {
 		openTask(bar)
 		return
@@ -791,84 +581,58 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 		currentDays: 0,
 	}
 	
-	const barGroup = (event.target as Element)?.closest('g')
+	const barGroup = (event.target as Element).closest('g')
 	const barElement = barGroup?.querySelector('.gantt-bar')
 	setCursor('grabbing', barElement)
+	
+	// Remove held visual if present
 	barGroup?.classList.remove('gantt-bar-held')
 	
-	const isTouch = event.pointerType === 'touch' || !(event instanceof PointerEvent)
-
-	const updateDragDays = (clientX: number) => {
+	const handleMove = (e: PointerEvent) => {
+		e.preventDefault() // Prevent scrolling while actively dragging
 		if (!dragState.value || !isDragging.value) return
-		const diff = clientX - dragState.value.startX
-		const days = Math.round(diff / DAY_WIDTH_PIXELS.value)
+		
+		const diff = e.clientX - dragState.value.startX
+		const days = Math.round(diff / DAY_WIDTH_PIXELS)
+		
 		if (days !== dragState.value.currentDays) {
 			dragState.value.currentDays = days
 		}
 	}
-
-	// Pointer handlers (mouse)
-	const handlePointerMove = (e: PointerEvent) => {
-		e.preventDefault()
-		updateDragDays(e.clientX)
-	}
 	
-	// Touch handlers (mobile)
-	const handleTouchMove = (e: TouchEvent) => {
-		e.preventDefault()
-		if (e.touches[0]) updateDragDays(e.touches[0].clientX)
-	}
-
 	const handleStop = () => {
-		// Remove all listeners
-		document.removeEventListener('pointermove', handlePointerMove)
-		document.removeEventListener('pointerup', handleStop)
-		document.removeEventListener('pointercancel', handleStop)
-		document.removeEventListener('touchmove', handleTouchMove)
-		document.removeEventListener('touchend', handleStop)
-		document.removeEventListener('touchcancel', handleStop)
-		dragMoveHandler = null
-		dragStopHandler = null
+		if (dragMoveHandler) {
+			document.removeEventListener('pointermove', dragMoveHandler)
+			dragMoveHandler = null
+		}
+		if (dragStopHandler) {
+			document.removeEventListener('pointerup', dragStopHandler)
+			document.removeEventListener('pointercancel', dragStopHandler)
+			dragStopHandler = null
+		}
 		
 		clearCursor(barElement)
 		
 		if (dragState.value && dragState.value.currentDays !== 0) {
-			const days = dragState.value.currentDays
-			const absDays = Math.abs(days)
-			const direction = days > 0 ? 'forward' : 'back'
-			const taskName = bar.meta?.label || `Task ${bar.id}`
-
-			dragConfirm.value = {
-				barId: bar.id,
-				taskName,
-				absDays,
-				direction,
-				originalStart: new Date(dragState.value.originalStart),
-				originalEnd: new Date(dragState.value.originalEnd),
-				currentDays: dragState.value.currentDays,
-				phase: 'move',
-			}
-
-			// Keep isDragging true so bar stays at preview position
-		} else {
-			isDragging.value = false
-			dragState.value = null
+			const newStart = new Date(dragState.value.originalStart)
+			newStart.setDate(newStart.getDate() + dragState.value.currentDays)
+			const newEnd = new Date(dragState.value.originalEnd)
+			newEnd.setDate(newEnd.getDate() + dragState.value.currentDays)
+			
+			updateGanttTask(bar.id, newStart, newEnd)
 		}
+		
+		isDragging.value = false
+		dragState.value = null
 	}
 	
 	// Store handlers for cleanup
-	dragMoveHandler = handlePointerMove
+	dragMoveHandler = handleMove
 	dragStopHandler = handleStop
 	
-	if (isTouch) {
-		document.addEventListener('touchmove', handleTouchMove, {passive: false})
-		document.addEventListener('touchend', handleStop)
-		document.addEventListener('touchcancel', handleStop)
-	} else {
-		document.addEventListener('pointermove', handlePointerMove)
-		document.addEventListener('pointerup', handleStop)
-		document.addEventListener('pointercancel', handleStop)
-	}
+	document.addEventListener('pointermove', handleMove)
+	document.addEventListener('pointerup', handleStop)
+	document.addEventListener('pointercancel', handleStop)
 }
 
 function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEvent) {
@@ -896,7 +660,7 @@ function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEv
 		if (!dragState.value || !isResizing.value) return
 		
 		const diff = e.clientX - dragState.value.startX
-		const days = Math.round(diff / DAY_WIDTH_PIXELS.value)
+		const days = Math.round(diff / DAY_WIDTH_PIXELS)
 		
 		if (edge === 'start') {
 			const newStart = new Date(dragState.value.originalStart)
@@ -1110,138 +874,5 @@ watch(ganttContainer, (el) => {
 	50% {
 		opacity: 0.35;
 	}
-}
-
-// Drag confirm bubble
-.drag-confirm-scrim {
-	position: fixed;
-	inset: 0;
-	background: rgba(0, 0, 0, 0.15);
-	z-index: 90;
-	cursor: pointer;
-}
-
-.drag-confirm-bubble {
-	position: fixed;
-	z-index: 100;
-	transform: translate(-50%, -100%);
-	background: var(--grey-900, #1a1a2e);
-	border: 1px solid var(--grey-700, #444);
-	border-radius: 10px;
-	padding: 4px 8px;
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-	white-space: nowrap;
-	pointer-events: auto;
-
-	&.cascade-phase {
-		border-color: var(--cascade-accent, #7e7);
-	}
-
-	&::after {
-		content: '';
-		position: absolute;
-		bottom: -6px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 0;
-		height: 0;
-		border-left: 6px solid transparent;
-		border-right: 6px solid transparent;
-		border-top: 6px solid var(--grey-900, #1a1a2e);
-	}
-}
-
-.drag-confirm-cascade-icon {
-	font-size: 0.85rem;
-	font-weight: bold;
-	line-height: 1;
-}
-
-.drag-confirm-label {
-	font-size: 0.75rem;
-	font-weight: 600;
-	color: var(--grey-100, #eee);
-	max-width: 180px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.drag-confirm-detail {
-	font-size: 0.7rem;
-	color: var(--grey-400, #aaa);
-}
-
-.drag-confirm-step {
-	font-size: 0.65rem;
-	color: var(--grey-300, #bbb);
-	background: rgba(255, 255, 255, 0.08);
-	padding: 1px 5px;
-	border-radius: 8px;
-}
-
-.drag-confirm-btn {
-	min-width: 26px;
-	height: 26px;
-	border-radius: 13px;
-	border: none;
-	cursor: pointer;
-	font-size: 0.7rem;
-	font-weight: bold;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 0 8px;
-	white-space: nowrap;
-	transition: transform 0.1s;
-
-	&:active {
-		transform: scale(0.9);
-	}
-}
-
-.drag-confirm-btn.confirm {
-	background: #4caf50;
-	color: white;
-}
-
-.drag-confirm-btn.skip {
-	background: #ff9800;
-	color: white;
-}
-
-.drag-confirm-btn.cancel {
-	background: #666;
-	color: white;
-}
-
-.drag-confirm-btn.confirm:hover {
-	background: #66bb6a;
-}
-
-.drag-confirm-btn.skip:hover {
-	background: #ffa726;
-}
-
-.drag-confirm-btn.cancel:hover {
-	background: #888;
-}
-
-// Bubble transition
-.bubble-enter-active {
-	transition: opacity 0.15s, transform 0.15s;
-}
-.bubble-leave-active {
-	transition: opacity 0.1s, transform 0.1s;
-}
-.bubble-enter-from {
-	opacity: 0;
-	transform: translate(-50%, -90%) scale(0.8);
-}
-.bubble-leave-to {
-	opacity: 0;
-	transform: translate(-50%, -100%) scale(0.9);
 }
 </style>

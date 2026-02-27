@@ -1,133 +1,171 @@
-# Vikunja Custom Build System
+# Vikunja Custom Build
 
-Build and deploy a custom Vikunja Docker image with Gantt UX, Task Templates, Chain Tasks, and Auto-Generated Tasks.
+Automated build pipeline for a customized [Vikunja](https://vikunja.io) Docker image. Clones upstream, patches source files, builds a Docker image, and optionally pushes/deploys.
 
----
+## Features (patched in)
+
+- **Gantt UX** — dependency arrows, subproject color coding, timeline header, vertical grid lines, arrow config panel
+- **Cascade Scheduling** — drag a task and downstream/upstream tasks offer to shift with ghost bar previews
+- **Drag Confirm** — inline bubble confirmation on task drag with accept/cancel
+- **Pinch to Zoom** — mobile two-finger zoom on Gantt timeline
+- **Mobile Drag** — touch-aware hold-to-drag via native TouchEvent API
+- **Task Templates** — save/load task templates with labels, assignees, descriptions
+- **Task Chains** — multi-step task workflows with collision-safe prefixes
+- **Auto-Generated Tasks** — cron-based recurring task creation from templates
+- **Task Duplication** — duplicate tasks with labels, assignees, attachments, comments
+- **Drag Reorder** — composable for drag-to-reorder in lists
+
+## Requirements
+
+- Windows with PowerShell 5.1+
+- Docker Desktop
+- Git
+- GitHub CLI (`winget install GitHub.cli`) — only for `-Release` flag
+
+## Quick Start
+
+```powershell
+# First run — will prompt for config
+.\vikunja-build.ps1
+
+# Build and deploy
+.\vikunja-build.ps1 -Deploy
+
+# Build, push to fork, create GitHub release, and deploy
+.\vikunja-build.ps1 -Release -Deploy
+
+# Import files from a folder into build-files/
+.\vikunja-build.ps1 -Import "C:\Users\antho\Downloads\update-files"
+
+# Then build + deploy
+.\vikunja-build.ps1 -Release -Deploy -CommitMsg "feat: my changes"
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| *(none)* | Patch + build Docker image |
+| `-Commit` | Git add + commit before build |
+| `-Push` | Push to fork after successful build (implies `-Commit`) |
+| `-Release` | Create GitHub release with tar (implies `-Commit -Push`) |
+| `-Deploy` | SCP tar to server + docker load |
+| `-CommitMsg "msg"` | Custom commit message (implies `-Commit`) |
+| `-Import "path"` | Copy files from path into `build-files/` and exit |
+| `-NoBuild` | Skip Docker build — use existing tar for git/release/deploy |
+| `-Force` | Rebuild even if no files changed (overrides hash check) |
+| `-SkipClone` | Reuse existing `vikunja-src/` |
+| `-SkipExtract` | Skip zip check in `downloads/` |
+| `-Setup` | Re-run config wizard |
+| `-ShowConfig` | Display current config and exit |
+| `-WipeConfig` | Delete config file and re-run wizard |
+
+## Workflow
+
+### Typical development cycle
+
+```powershell
+# 1. Get updated files (from Claude, manual edits, etc.)
+#    Drop them in a folder or use -Import:
+.\vikunja-build.ps1 -Import "C:\Downloads\update-files"
+
+# 2. Build and test locally
+.\vikunja-build.ps1
+
+# 3. Deploy when ready
+.\vikunja-build.ps1 -Release -Deploy -CommitMsg "feat: description of changes"
+```
+
+### Smart build detection
+
+The script computes a SHA256 hash of all files in `build-files/` and compares against the last successful build. If nothing changed, Docker build is skipped and the existing tar is reused.
+
+```powershell
+# Normal — skips build if nothing changed
+.\vikunja-build.ps1 -Deploy
+
+# Force rebuild regardless
+.\vikunja-build.ps1 -Force -Deploy
+
+# Skip build entirely — test the release/deploy pipeline
+.\vikunja-build.ps1 -NoBuild -Release -Deploy
+```
+
+### Dual-repo releases
+
+When using `-Release`, the script pushes GitHub releases to both:
+1. **Fork repo** (your Vikunja fork) — tagged with the source hash
+2. **Build-tools repo** (this repo) — same tag, same tar asset
+
+Both releases include the commit message, build info table, and quick deploy commands.
+
+## Config
+
+On first run (or `-Setup`), you'll be prompted for:
+
+| Setting | Description | Default |
+|---|---|---|
+| Clone URL | Upstream Vikunja repo | `https://github.com/go-vikunja/vikunja.git` |
+| Push URL | Your fork (for `-Push`/`-Release`) | *(empty)* |
+| Git branch | Branch name for push | *(empty)* |
+| Commit message | Default commit message | `custom: patched build` |
+| Image name | Docker image name | `vikunja-custom` |
+| SSH host/user/port/key | Deploy target | *(empty)* |
+| Remote path | Where to SCP the tar | `/tmp` |
+
+Config is stored in `build-config.json` (gitignored).
+
+## Pipeline
+
+```
+[1] Check downloads/ for update zip
+[2] Verify build-files/ exists
+[3] Clone fresh from upstream
+[4] Patch source (copy build-files into clone)
+[5] Auto-fix upstream compat (typesense bypass, xorm pointer fix, etc.)
+[6] Change detection (SHA256 hash comparison)
+[7] Docker build (multi-stage: frontend + Go backend)
+[8] Save tar + timestamped backup
+[9] Git push + GitHub releases (if -Release)
+[10] Deploy to server (if -Deploy)
+```
 
 ## Directory Structure
 
 ```
-vikunja-custom/
-├── vikunja-build.ps1      ← Main build script (run this)
-├── deploy-config.json     ← Auto-generated on first deploy
-├── README.md
-├── build-files/           ← Patch files (51 files: .go, .vue, .ts, .json, .md)
-├── builds-tar/            ← Docker image tarballs (output)
-├── downloads/             ← Drop .zip here for updates (auto-deleted after extract)
-└── vikunja-src/           ← Auto-cloned Vikunja source
+vikunja-custom-build/
+├── vikunja-build.ps1          ← build script
+├── build-files/               ← patched source files
+│   ├── tasks.go               ← backend models
+│   ├── GanttChart.vue         ← gantt with touch handling
+│   ├── 20260223120000.go      ← database migrations
+│   └── ...
+├── docs/
+│   ├── DEPLOY.md
+│   ├── PATCH_MANIFEST.md
+│   └── AUTO_TASKS.md
+├── .gitignore
+└── README.md
 ```
 
----
+## Auto-Patches
 
-## Prerequisites
+The build script automatically fixes upstream compatibility issues:
 
-- **Windows** with PowerShell 5.1+
-- **Docker Desktop** (or Docker Engine with `docker buildx`)
-- **Git** (for cloning Vikunja source)
-- **SSH key** (for deploy only)
+- **Typesense bypass** — `tasks.go` and `init.go` bypass Typesense search
+- **xorm pointer fix** — `Update(ot)` → `Update(&ot)` to prevent panic on task update
+- **background.go** — `DeleteBackgroundFileIfExists` signature fix
+- **Dockerfile** — injects `go mod tidy` before `mage build`
+- **UTF-8 no-BOM** — all Go source writes use UTF-8 without BOM (PowerShell 5.1 compat)
 
----
+## Deploying Manually
 
-## Quick Start
-
-### First Build
-
-```powershell
-cd vikunja-custom
-.\vikunja-build.ps1
-```
-
-This will:
-1. Clone fresh Vikunja source from upstream
-2. Patch it with the custom files in `build-files\`
-3. Build `vikunja-custom:latest` Docker image
-
-### Build + Deploy
-
-```powershell
-.\vikunja-build.ps1 -Deploy
-```
-
-First deploy prompts for SSH details and saves them. Subsequent deploys auto-proceed with a 5-second cancel window.
-
-### Rebuild (skip re-clone)
-
-```powershell
-.\vikunja-build.ps1 -SkipClone
-```
-
-```powershell
-.\vikunja-build.ps1 -Deploy -SkipClone
-```
-
----
-
-## Updating
-
-When you receive an updated `.zip`:
-
-1. Drop the zip into the `downloads\` folder
-2. Run `.\vikunja-build.ps1 -Deploy`
-
-The script will:
-- Extract the zip into `build-files\` (replacing existing files)
-- **Delete the zip** after extraction
-- If no zip is found, it proceeds using whatever is already in `build-files\`
-- If a new `vikunja-build.ps1` is inside the zip, it self-replaces and asks you to re-run
-- Clone fresh source, patch, build, and deploy
-
-You can also edit files directly in `build-files\` and run the script — it works with or without a zip.
-
----
-
-## Deploy Configuration
-
-On first deploy, you'll be prompted for:
-- Server hostname/IP
-- SSH username
-- SSH port
-- SSH key path
-- Remote folder for temp file transfer
-
-These are saved to `deploy-config.json`. On subsequent deploys, the saved config is shown with a 5-second countdown — press any key to cancel.
-
-To reconfigure: delete `deploy-config.json` and re-run with `-Deploy`.
-
----
-
-## Output
-
-Built images are saved to `builds-tar\`:
-- `vikunja-custom-YYYYMMDD-HHmmss.tar` — timestamped archive
-- `vikunja-custom-latest.tar` — always the most recent build
-
-### Manual Deploy (Linux server)
+After build, the tar is in `builds-tar/`. To deploy without the script:
 
 ```bash
-docker load -i vikunja-custom-latest.tar
-cd ~/vikunja && docker compose down && docker compose up -d
+# Copy to server
+scp builds-tar/vikunja-custom.tar user@server:/tmp/
+
+# Load and restart
+ssh user@server 'docker load -i /tmp/vikunja-custom.tar; cd ~/vikunja; docker compose down; docker compose up -d'
 ```
-
----
-
-## Features (PR #2294)
-
-- **Gantt UX**: Touch-friendly drag, dependency arrows, grid lines, timeline header
-- **Task Templates**: Reusable task templates with labels, priority, attachments
-- **Chain Tasks**: Multi-step task chains with offset scheduling
-- **Auto-Generated Tasks**: Recurring task generation with multi-project support
-- **Duplicate Tasks**: One-click task duplication
-- **UI Improvements**: Bolt indicators across all views, mobile context menu fixes
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| `Docker not found` | Install Docker Desktop |
-| `Clone failed` | Check internet, try `git clone` manually |
-| `BUILD FAILED` | Check error output, re-run with `-SkipClone` |
-| `SCP upload failed` | Run `ssh-copy-id -i <key> -p <port> user@host` |
-| `Migration failed` | Clear stuck entry: `DELETE FROM xormigrate WHERE id = '...'` |
-| Build takes too long | Subsequent builds use Docker cache (~60-80s) |

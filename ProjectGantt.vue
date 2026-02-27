@@ -57,7 +57,6 @@
 					class="has-overflow"
 				>
 					<GanttChart
-						ref="ganttChartRef"
 						:filters="filters"
 						:tasks="tasks"
 						:is-loading="isLoading"
@@ -196,18 +195,7 @@ const {
 	canUndo,
 	undoLastAction,
 	cascadePreviews,
-	onCascadePrompt,
 } = useGanttFilters(route, viewId, subprojectParams)
-
-// Ref to GanttChart for cascade bubble
-const ganttChartRef = ref<InstanceType<typeof GanttChart> | null>(null)
-
-// Wire cascade prompts to the bubble in GanttChart
-onCascadePrompt.value = (info) => {
-	if (ganttChartRef.value?.showCascadeInBubble) {
-		ganttChartRef.value.showCascadeInBubble(info)
-	}
-}
 
 const DEFAULT_DATE_RANGE_DAYS = 7
 

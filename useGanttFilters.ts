@@ -161,7 +161,6 @@ export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref
 		canUndo,
 		undoLastAction,
 		cascadePreviews,
-		onCascadePrompt,
 	} = useGanttTaskList<GanttFilters>(filters, ganttFiltersToApiParams, viewId, true, extraParams)
 
 	return {
@@ -178,6 +177,5 @@ export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref
 		canUndo,
 		undoLastAction,
 		cascadePreviews,
-		onCascadePrompt,
 	}
 }

@@ -61,7 +61,6 @@ $defaultConfig = @{
     gitBranch        = ""
     defaultCommitMsg = "custom: patched build"
     imageName        = "vikunja-custom"
-    releaseRepos     = @()   # Array of @{name="Label"; slug="owner/repo"} for multi-repo releases
     sshHost          = ""
     sshUser          = "root"
     sshPort          = "22"
@@ -76,20 +75,7 @@ function Load-Config {
             $cfg = @{}
             foreach ($key in $defaultConfig.Keys) {
                 $val = $json.PSObject.Properties[$key]
-                if ($val -and $null -ne $val.Value) {
-                    # Handle array types (releaseRepos)
-                    if ($key -eq "releaseRepos" -and $val.Value -is [array]) {
-                        $cfg[$key] = @($val.Value | ForEach-Object {
-                            @{ name = $_.name; slug = $_.slug }
-                        })
-                    } elseif ($key -eq "releaseRepos") {
-                        $cfg[$key] = @()
-                    } elseif ($val.Value) {
-                        $cfg[$key] = $val.Value
-                    } else {
-                        $cfg[$key] = $defaultConfig[$key]
-                    }
-                }
+                if ($val -and $val.Value) { $cfg[$key] = $val.Value }
                 else { $cfg[$key] = $defaultConfig[$key] }
             }
             return $cfg
@@ -122,32 +108,6 @@ function Run-Setup($cfg) {
 
     Write-Host "`n  -- Deploy Settings (leave blank to skip) --" -ForegroundColor Cyan
 
-    # Release repos configuration
-    Write-Host "`n  -- Release Repos (GitHub repos to publish releases to) --" -ForegroundColor Cyan
-    if ($cfg["releaseRepos"].Count -gt 0) {
-        Write-Host "  Current repos:" -ForegroundColor DarkGray
-        for ($i = 0; $i -lt $cfg["releaseRepos"].Count; $i++) {
-            $r = $cfg["releaseRepos"][$i]
-            Write-Host "    [$($i+1)] $($r.name): $($r.slug)" -ForegroundColor Gray
-        }
-    }
-    Write-Host "  (Fork repo is always included automatically from push URL)" -ForegroundColor DarkGray
-    $editRepos = Read-Host "  Edit release repos? [y/N]"
-    if ($editRepos -eq 'y' -or $editRepos -eq 'Y') {
-        $newRepos = @()
-        $adding = $true
-        while ($adding) {
-            $repoName = Read-Host "  Repo label (e.g. 'Build-tools') [blank to finish]"
-            if (-not $repoName) { $adding = $false; continue }
-            $repoSlug = Read-Host "  GitHub slug (e.g. 'owner/repo-name')"
-            if ($repoSlug) {
-                $newRepos += @{ name = $repoName; slug = $repoSlug }
-                Write-Host "    Added: $repoName -> $repoSlug" -ForegroundColor Green
-            }
-        }
-        $cfg["releaseRepos"] = $newRepos
-    }
-
     $cfg["sshHost"]    = Prompt-Setting "SSH host"           $cfg["sshHost"]
     $cfg["sshUser"]    = Prompt-Setting "SSH user"           $cfg["sshUser"]
     $cfg["sshPort"]    = Prompt-Setting "SSH port"           $cfg["sshPort"]
@@ -170,20 +130,9 @@ if ($ShowConfig) {
         Write-Host "`n  Current config ($CONFIG_FILE):" -ForegroundColor Cyan
         Write-Host ""
         foreach ($key in ($cfg.Keys | Sort-Object)) {
-            if ($key -eq "releaseRepos") {
-                $repoList = $cfg[$key]
-                if ($repoList -and $repoList.Count -gt 0) {
-                    Write-Host "    $($key.PadRight(20)) ($($repoList.Count) repos)" -ForegroundColor Gray
-                    foreach ($r in $repoList) {
-                        Write-Host "    $(' ' * 22)- $($r.name): $($r.slug)" -ForegroundColor DarkGray
-                    }
-                } else {
-                    Write-Host "    $($key.PadRight(20)) (none - fork + build-tools auto-detected)" -ForegroundColor Gray
-                }
-            } else {
-                $val = if ($cfg[$key]) { $cfg[$key] } else { "(not set)" }
-                Write-Host "    $($key.PadRight(20)) $val" -ForegroundColor Gray
-            }
+            $val = if ($cfg[$key]) { $cfg[$key] } else { "(not set)" }
+            # Mask SSH key path display
+            Write-Host "    $($key.PadRight(20)) $val" -ForegroundColor Gray
         }
         Write-Host ""
     } else {
@@ -756,29 +705,6 @@ if ($Push) {
 
     $ErrorActionPreference = $oldEAP
     Set-Location $PROJ
-
-    # Also push the build-tools repo (project directory) if it has a remote
-    $oldEAP2 = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-
-    $buildRemoteUrl = (git remote get-url origin 2>&1) | Out-String
-    if ($LASTEXITCODE -eq 0 -and $buildRemoteUrl.Trim()) {
-        git add -A 2>&1 | Out-Null
-        $hasBuildChanges = (git status --porcelain 2>&1) | Out-String
-        if ($hasBuildChanges.Trim()) {
-            $buildMsg = if ($CommitMsg) { $CommitMsg } else { "$($cfg['defaultCommitMsg']) ($(Get-Date -Format 'yyyy-MM-dd HH:mm'))" }
-            git commit -m $buildMsg --quiet 2>&1 | Out-Null
-            Write-Host "  Build-tools committed" -ForegroundColor DarkGray
-        }
-        git push origin HEAD --force 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  Build-tools pushed OK ($($buildRemoteUrl.Trim()))" -ForegroundColor Green
-        } else {
-            Write-Host "  Build-tools push failed" -ForegroundColor DarkYellow
-        }
-    }
-
-    $ErrorActionPreference = $oldEAP2
 }
 
 # ===========================
@@ -855,76 +781,76 @@ if ($Release) {
         $oldEAP = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
 
-        # Build the release target list: fork repo (from pushUrl) + configured releaseRepos
-        $releaseTargets = @()
-
-        # Auto-add fork repo from pushUrl
+        # --- Release 1: Fork repo (trbom5c/vikunja) ---
         if ($PUSH_URL) {
+            Write-Host "  [Release 1] Fork repo" -ForegroundColor Cyan
+            Set-Location $SOURCE
+
+            # Ensure fork remote exists
+            $existingUrl = (git remote get-url fork 2>&1) | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                git remote add fork $PUSH_URL 2>&1 | Out-Null
+            }
+
+            # Create tag and push to fork
+            git tag -f $tag 2>&1 | Out-Null
+            git push fork $tag --force 2>&1 | Out-Null
+
+            # Extract owner/repo from push URL
             $forkSlug = ""
             if ($PUSH_URL -match 'github\.com[/:]([^/]+/[^/.]+)') {
                 $forkSlug = $Matches[1] -replace '\.git$', ''
             }
-            if ($forkSlug) {
-                $releaseTargets += @{ name = "Fork"; slug = $forkSlug; tagFrom = "fork" }
-            }
-        }
+            $forkFlag = if ($forkSlug) { "--repo $forkSlug" } else { "" }
 
-        # Auto-add build-tools repo from current directory
-        $buildRemote = (git remote get-url origin 2>&1) | Out-String
-        if ($LASTEXITCODE -eq 0 -and $buildRemote -match 'github\.com[/:]([^/]+/[^/.]+)') {
-            $autoSlug = $Matches[1] -replace '\.git$', ''
-            # Only add if not already in releaseRepos
-            $alreadyConfigured = $cfg["releaseRepos"] | Where-Object { $_.slug -eq $autoSlug }
-            if (-not $alreadyConfigured) {
-                $releaseTargets += @{ name = "Build-tools"; slug = $autoSlug; tagFrom = "origin" }
-            }
-        }
-
-        # Add user-configured release repos
-        foreach ($repo in $cfg["releaseRepos"]) {
-            $releaseTargets += @{ name = $repo.name; slug = $repo.slug; tagFrom = "origin" }
-        }
-
-        # Release to each target
-        for ($ri = 0; $ri -lt $releaseTargets.Count; $ri++) {
-            $target = $releaseTargets[$ri]
-            $repoNum = $ri + 1
-            Write-Host "  [Release $repoNum] $($target.name) repo" -ForegroundColor Cyan
-
-            if ($target.tagFrom -eq "fork") {
-                # Tag in the fork source repo
-                Set-Location $SOURCE
-                $existingUrl = (git remote get-url fork 2>&1) | Out-String
-                if ($LASTEXITCODE -ne 0) {
-                    git remote add fork $PUSH_URL 2>&1 | Out-Null
-                }
-                git tag -f $tag 2>&1 | Out-Null
-                git push fork $tag --force 2>&1 | Out-Null
-                Set-Location $PROJ
-            } else {
-                # Tag in the build-tools/project repo
-                git tag -f $tag 2>&1 | Out-Null
-                git push origin $tag --force 2>&1 | Out-Null
-            }
-
-            $repoFlag = "--repo $($target.slug)"
-            $ghCmd = "gh release create $tag $latestTar --title `"$releaseName`" --notes-file `"$notesFile`" --latest $repoFlag"
+            $ghCmd = "gh release create $tag $latestTar --title `"$releaseName`" --notes-file `"$notesFile`" --latest $forkFlag"
             Invoke-Expression $ghCmd 2>&1 | Out-String | ForEach-Object {
                 if ($_.Trim()) { Write-Host "  $_" -ForegroundColor DarkGray }
             }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "  Release exists, uploading asset..." -ForegroundColor DarkGray
-                Invoke-Expression "gh release upload $tag $latestTar --clobber $repoFlag" 2>&1 | Out-Null
+                Invoke-Expression "gh release upload $tag $latestTar --clobber $forkFlag" 2>&1 | Out-Null
             }
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "  $($target.name) release OK: $tag - $sizeMB MB" -ForegroundColor Green
+                Write-Host "  Fork release OK: $tag - $sizeMB MB" -ForegroundColor Green
             } else {
-                Write-Host "  $($target.name) release failed" -ForegroundColor DarkYellow
+                Write-Host "  Fork release failed (check gh auth status)" -ForegroundColor DarkYellow
             }
+
+            Set-Location $PROJ
         }
 
-        if ($releaseTargets.Count -eq 0) {
-            Write-Host "  No release repos configured. Run -Setup to add them." -ForegroundColor Yellow
+        # --- Release 2: Build-tools repo (detected from current directory) ---
+        Write-Host "  [Release 2] Build-tools repo" -ForegroundColor Cyan
+
+        # Detect build-tools repo from current git remote
+        $buildSlug = ""
+        $buildRemote = (git remote get-url origin 2>&1) | Out-String
+        if ($LASTEXITCODE -eq 0 -and $buildRemote -match 'github\.com[/:]([^/]+/[^/.]+)') {
+            $buildSlug = $Matches[1] -replace '\.git$', ''
+        }
+
+        if ($buildSlug) {
+            # Tag the build-tools repo too
+            git tag -f $tag 2>&1 | Out-Null
+            git push origin $tag --force 2>&1 | Out-Null
+
+            $buildFlag = "--repo $buildSlug"
+            $ghCmd = "gh release create $tag $latestTar --title `"$releaseName`" --notes-file `"$notesFile`" --latest $buildFlag"
+            Invoke-Expression $ghCmd 2>&1 | Out-String | ForEach-Object {
+                if ($_.Trim()) { Write-Host "  $_" -ForegroundColor DarkGray }
+            }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  Release exists, uploading asset..." -ForegroundColor DarkGray
+                Invoke-Expression "gh release upload $tag $latestTar --clobber $buildFlag" 2>&1 | Out-Null
+            }
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Build-tools release OK: $tag - $sizeMB MB" -ForegroundColor Green
+            } else {
+                Write-Host "  Build-tools release failed" -ForegroundColor DarkYellow
+            }
+        } else {
+            Write-Host "  Skipped - no git remote found in project directory" -ForegroundColor DarkYellow
         }
 
         $ErrorActionPreference = $oldEAP

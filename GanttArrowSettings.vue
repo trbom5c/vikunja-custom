@@ -14,42 +14,10 @@
 			class="arrow-settings-panel"
 		>
 			<div class="panel-header">
-				<span class="panel-title">Gantt Settings</span>
+				<span class="panel-title">{{ $t('gantt.arrows.panelTitle') }}</span>
 				<button class="panel-close" @click="isOpen = false">✕</button>
 			</div>
 
-			<!-- ═══ USER PREFERENCES ═══ -->
-			<div class="setting-section">
-				<div class="section-label">Drag & Cascade</div>
-				<div class="setting-row">
-					<label>Cascade Mode</label>
-					<select v-model="cascadeMode" class="setting-select">
-						<option value="bulk">Shift all at once</option>
-						<option value="individual">Confirm each task</option>
-					</select>
-				</div>
-				<div class="setting-hint">
-					{{ cascadeMode === 'bulk' ? 'One confirm shifts all downstream tasks together' : 'You\'ll confirm each affected task individually' }}
-				</div>
-				<div class="setting-row">
-					<label>Prompt Style</label>
-					<select v-model="cascadeStyle" class="setting-select">
-						<option value="toast">Sticky Toast</option>
-						<option value="modal">Dialog Box</option>
-					</select>
-				</div>
-				<div class="setting-hint">How cascade shift prompts appear when dragging tasks</div>
-			</div>
-
-			<!-- ═══ ARROW CONFIG (collapsible) ═══ -->
-			<div class="setting-section collapsible-header" @click="arrowConfigOpen = !arrowConfigOpen">
-				<div class="section-label" style="cursor: pointer; display: flex; align-items: center; gap: 6px;">
-					<span class="collapse-caret" :class="{ open: arrowConfigOpen }">▶</span>
-					Arrow Settings
-				</div>
-			</div>
-
-			<template v-if="arrowConfigOpen">
 			<!-- Master Enable/Disable -->
 			<div class="setting-section master-toggle">
 				<div class="setting-row toggle-row">
@@ -238,7 +206,19 @@
 				</div>
 
 			</div>
-			</template>
+
+			<!-- Cascade Prompt Style -->
+			<div class="setting-section">
+				<div class="section-label">Cascade Prompts</div>
+				<div class="setting-row">
+					<label>Style</label>
+					<select v-model="cascadeStyle" class="setting-select">
+						<option value="toast">Sticky Toast</option>
+						<option value="modal">Dialog Box</option>
+					</select>
+				</div>
+				<div class="setting-hint">How cascade shift prompts appear when dragging tasks</div>
+			</div>
 
 			<!-- Actions -->
 			<div class="panel-actions">
@@ -271,7 +251,6 @@ const isOpen = ref(false)
 const showImport = ref(false)
 const importJson = ref('')
 const statusMsg = ref('')
-const arrowConfigOpen = ref(false)
 
 // Cascade prompt style preference
 const CASCADE_PREF_KEY = 'gantt-cascade-prompt-style'
@@ -285,20 +264,6 @@ const cascadeStyle = ref<'toast' | 'modal'>((() => {
 
 watch(cascadeStyle, (val) => {
 	try { localStorage.setItem(CASCADE_PREF_KEY, val) } catch {}
-})
-
-// Cascade mode: bulk (all at once) or individual (one by one)
-const CASCADE_MODE_KEY = 'gantt-cascade-mode'
-const cascadeMode = ref<'bulk' | 'individual'>((() => {
-	try {
-		const val = localStorage.getItem(CASCADE_MODE_KEY)
-		if (val === 'bulk' || val === 'individual') return val
-	} catch {}
-	return 'bulk'
-})())
-
-watch(cascadeMode, (val) => {
-	try { localStorage.setItem(CASCADE_MODE_KEY, val) } catch {}
 })
 
 function copyConfig() {
@@ -418,25 +383,6 @@ function doImport() {
 
 	.is-dark-mode & {
 		border-color: rgba(100, 120, 200, 0.1);
-	}
-}
-
-.collapsible-header {
-	cursor: pointer;
-	user-select: none;
-
-	&:hover {
-		background: rgba(100, 120, 200, 0.05);
-	}
-}
-
-.collapse-caret {
-	font-size: 8px;
-	transition: transform 0.2s;
-	display: inline-block;
-
-	&.open {
-		transform: rotate(90deg);
 	}
 }
 

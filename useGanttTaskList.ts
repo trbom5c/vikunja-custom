@@ -23,17 +23,7 @@ function getCascadePromptStyle(): 'toast' | 'modal' {
 	return 'toast'
 }
 
-// Cascade mode: 'bulk' = shift all at once, 'individual' = confirm each
-const CASCADE_MODE_KEY = 'gantt-cascade-mode'
-function getCascadeMode(): 'bulk' | 'individual' {
-	try {
-		const val = localStorage.getItem(CASCADE_MODE_KEY)
-		if (val === 'bulk' || val === 'individual') return val
-	} catch {}
-	return 'bulk'
-}
 export interface CascadePreview {
-	id: string
 	taskIds: Set<number>
 	deltaDays: number
 	direction: 'precedes' | 'follows'
@@ -49,7 +39,6 @@ export interface UseGanttTaskListReturn {
 	canUndo: ComputedRef<boolean>
 	undoLastAction: () => Promise<void>
 	cascadePreviews: Ref<CascadePreview[]>
-	onCascadePrompt: Ref<((info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) => void) | null>
 }
 
 // FIXME: unify with general `useTaskList`
@@ -116,12 +105,9 @@ export function useGanttTaskList<F extends Filters>(
 
 	const cascadePreviews = ref<CascadePreview[]>([])
 
-	let cascadeIdCounter = 0
-	const onCascadePrompt = ref<((info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) => void) | null>(null)
-
-	function clearCascadePreview(previewId?: string) {
-		if (previewId) {
-			cascadePreviews.value = cascadePreviews.value.filter(p => p.id !== previewId)
+	function clearCascadePreview(direction?: string) {
+		if (direction) {
+			cascadePreviews.value = cascadePreviews.value.filter(p => p.direction !== direction)
 		} else {
 			cascadePreviews.value = []
 		}
@@ -298,34 +284,21 @@ export function useGanttTaskList<F extends Filters>(
 
 					// Show preview of affected tasks
 					const previewIds = await collectChainTaskIds(predecessors!, 'follows')
-					const predPreviewId = `cascade-${++cascadeIdCounter}`
-					cascadePreviews.value.push({id: predPreviewId, taskIds: previewIds, deltaDays, direction: 'follows', accentColor: predColor})
+					cascadePreviews.value.push({taskIds: previewIds, deltaDays, direction: 'follows', accentColor: predColor})
 
 					if (promptStyle === 'modal') {
 						const confirmed = window.confirm(`Overlaps predecessor(s): ${predNames}. Shift ${absDays} day(s) back?`)
-						clearCascadePreview(predPreviewId)
+						clearCascadePreview()
 						if (confirmed) {
 							await cascadeShiftChain(predecessors!, deltaDays, 'follows')
-							await loadTasks()
 						}
-					} else if (onCascadePrompt.value) {
-						onCascadePrompt.value({
-							label: `↑ Predecessors`,
-							names: predNames,
-							absDays,
-							direction: 'back',
-							accentColor: predColor,
-							action: async () => { await cascadeShiftChain(predecessors!, deltaDays, 'follows'); clearCascadePreview(predPreviewId); await loadTasks() },
-							dismiss: () => { clearCascadePreview(predPreviewId) },
-							barId: String(predecessors![0]?.id || ''),
-						})
 					} else {
 						warning(`Overlaps: ${predNames}`, [{
 							title: `Shift ${absDays}d back`,
-							callback: async () => { await cascadeShiftChain(predecessors!, deltaDays, 'follows'); clearCascadePreview(predPreviewId); await loadTasks() },
+							callback: () => { cascadeShiftChain(predecessors!, deltaDays, 'follows'); clearCascadePreview('follows') },
 						}, {
 							title: 'Dismiss',
-							callback: () => clearCascadePreview(predPreviewId),
+							callback: () => clearCascadePreview('follows'),
 						}], {accentColor: predColor, label: `↑ Predecessors`})
 					}
 				}
@@ -348,132 +321,27 @@ export function useGanttTaskList<F extends Filters>(
 
 				// Show preview of affected tasks
 				const previewIds = await collectChainTaskIds(successors!, 'precedes')
-				const succPreviewId = `cascade-${++cascadeIdCounter}`
-				cascadePreviews.value.push({id: succPreviewId, taskIds: previewIds, deltaDays, direction: 'precedes', accentColor: succColor})
-
-				const cascadeMode = getCascadeMode()
+				cascadePreviews.value.push({taskIds: previewIds, deltaDays, direction: 'precedes', accentColor: succColor})
 
 				if (promptStyle === 'modal') {
 					const confirmed = window.confirm(`Shift downstream: ${succNames} — ${absDays} day(s) ${direction}?`)
-					clearCascadePreview(succPreviewId)
+					clearCascadePreview()
 					if (confirmed) {
 						await cascadeShiftChain(successors!, deltaDays, 'precedes')
-						await loadTasks() // Refetch so arrows redraw with updated positions
 					}
-				} else if (cascadeMode === 'individual' && onCascadePrompt.value) {
-					// Individual mode: step through each successor one at a time
-					cascadeStepThrough(successors!, deltaDays, 'precedes', absDays, direction, succColor, succPreviewId)
-				} else if (onCascadePrompt.value) {
-					onCascadePrompt.value({
-						label: `↓ ${successors!.length} Downstream`,
-						names: succNames,
-						absDays,
-						direction,
-						accentColor: succColor,
-						action: async () => { await cascadeShiftChain(successors!, deltaDays, 'precedes'); clearCascadePreview(succPreviewId); await loadTasks() },
-						dismiss: () => { clearCascadePreview(succPreviewId) },
-						barId: String(successors![0]?.id || ''),
-					})
 				} else {
 					warning(`${succNames}`, [{
 						title: `Shift ${absDays}d ${direction}`,
-						callback: async () => { await cascadeShiftChain(successors!, deltaDays, 'precedes'); clearCascadePreview(succPreviewId); await loadTasks() },
+						callback: () => { cascadeShiftChain(successors!, deltaDays, 'precedes'); clearCascadePreview('precedes') },
 					}, {
 						title: 'Dismiss',
-						callback: () => clearCascadePreview(succPreviewId),
+						callback: () => clearCascadePreview('precedes'),
 					}], {accentColor: succColor, label: `↓ ${successors!.length} Downstream`})
 				}
 			}
 		} catch (e) {
 			console.error('Failed to check cascade:', e)
 		}
-	}
-
-	/**
-	 * Individual cascade mode: step through each downstream task one at a time.
-	 * Shows the bubble anchored to each task bar in sequence.
-	 * ✓ = shift this task, → = skip this task, ✕ = cancel remaining.
-	 */
-	function cascadeStepThrough(
-		chainTasks: ITask[],
-		deltaDays: number,
-		direction: 'precedes' | 'follows',
-		absDays: number,
-		dirLabel: string,
-		accentColor: string,
-		previewId: string,
-	) {
-		const deltaMs = deltaDays * 24 * 60 * 60 * 1000
-		const total = chainTasks.length
-		let currentIndex = 0
-		const shiftedIds = new Set<number>()
-
-		// Add all cascade targets to undo snapshot upfront
-		if (undoStack.value) {
-			for (const t of chainTasks) {
-				const existing = tasks.value.get(t.id)
-				if (existing && !undoStack.value.snapshots.has(t.id)) {
-					undoStack.value.snapshots.set(t.id, klona(existing))
-				}
-			}
-		}
-
-		function promptNext() {
-			if (currentIndex >= total || !onCascadePrompt.value) {
-				// Done — clean up previews, refetch for arrows
-				clearCascadePreview(previewId)
-				if (shiftedIds.size > 0) {
-					loadTasks()
-				}
-				return
-			}
-
-			const task = chainTasks[currentIndex]
-			const taskName = task.title || `Task #${task.id}`
-
-			onCascadePrompt.value({
-				label: `↓ ${taskName}`,
-				names: `${currentIndex + 1} of ${total}`,
-				absDays,
-				direction: dirLabel,
-				accentColor,
-				barId: String(task.id),
-				stepIndex: currentIndex,
-				stepTotal: total,
-				action: async () => {
-					// Shift this task
-					const shiftedTask: Record<string, any> = {id: task.id}
-					if (task.startDate) shiftedTask.startDate = new Date(new Date(task.startDate).getTime() + deltaMs)
-					if (task.endDate) shiftedTask.endDate = new Date(new Date(task.endDate).getTime() + deltaMs)
-					if (task.dueDate) shiftedTask.dueDate = new Date(new Date(task.dueDate).getTime() + deltaMs)
-
-					try {
-						const updated = await taskService.update({...task, ...shiftedTask})
-						tasks.value.set(updated.id, updated)
-						shiftedIds.add(updated.id)
-					} catch (e) {
-						console.error(`Failed to cascade task ${task.id}:`, e)
-					}
-
-					currentIndex++
-					promptNext()
-				},
-				skip: () => {
-					// Skip this task, move to next
-					currentIndex++
-					promptNext()
-				},
-				dismiss: () => {
-					// Cancel all remaining
-					clearCascadePreview(previewId)
-					if (shiftedIds.size > 0) {
-						loadTasks()
-					}
-				},
-			})
-		}
-
-		promptNext()
 	}
 
 	function findEarliestDate(tasks: ITask[]): Date | null {
@@ -545,6 +413,5 @@ export function useGanttTaskList<F extends Filters>(
 		canUndo,
 		undoLastAction,
 		cascadePreviews,
-		onCascadePrompt,
 	}
 }
