@@ -27,6 +27,7 @@ export function useGanttTaskList<F extends Filters>(
 	filterToApiParams: (filters: F) => TaskFilterParams,
 	viewId: Ref<IProjectView['id']>,
 	loadAll: boolean = true,
+	extraParams?: Ref<Record<string, unknown>>,
 ) : UseGanttTaskListReturn {
 	const taskCollectionService = shallowReactive(new TaskCollectionService())
 	const taskService = shallowReactive(new TaskService())
@@ -41,8 +42,13 @@ export function useGanttTaskList<F extends Filters>(
 		if (params.filter_timezone === '') {
 			params.filter_timezone = authStore.settings.timezone
 		}
+
+		// Merge any extra params (e.g. include_subprojects, exclude_project_ids)
+		const mergedParams = extraParams?.value
+			? {...params, ...extraParams.value}
+			: params
 		
-		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, params, page) as ITask[]
+		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, mergedParams, page) as ITask[]
 		if (loadAll && page < taskCollectionService.totalPages) {
 			const nextTasks = await fetchTasks(params, page + 1)
 			return tasks.concat(nextTasks)
@@ -108,10 +114,133 @@ export function useGanttTaskList<F extends Filters>(
 			// update the task with possible changes from server
 			tasks.value.set(updatedTask.id, updatedTask)
 			success('Saved')
+
+			// Check for date cascade: if start or end date changed, check for downstream chain tasks
+			const startChanged = oldTask.startDate?.toString() !== newTask.startDate?.toString()
+			const endChanged = oldTask.endDate?.toString() !== newTask.endDate?.toString()
+
+			if (startChanged || endChanged) {
+				await checkCascadeDownstream(updatedTask, oldTask)
+			}
 		} catch (_) {
 			error('Something went wrong saving the task')
 			// roll back changes
 			tasks.value.set(task.id, oldTask)
+		}
+	}
+
+	async function checkCascadeDownstream(updatedTask: ITask, oldTask: ITask) {
+		try {
+			const fullTask = await taskService.get(new TaskModel({id: updatedTask.id}))
+			const precedesTasks = fullTask?.relatedTasks?.precedes
+			const followsTasks = fullTask?.relatedTasks?.follows
+
+			const hasPrecedes = precedesTasks && Array.isArray(precedesTasks) && precedesTasks.length > 0
+			const hasFollows = followsTasks && Array.isArray(followsTasks) && followsTasks.length > 0
+
+			if (!hasPrecedes && !hasFollows) return
+
+			const oldStart = oldTask.startDate ? new Date(oldTask.startDate).getTime() : 0
+			const newStart = updatedTask.startDate ? new Date(updatedTask.startDate).getTime() : 0
+			if (oldStart === 0 || newStart === 0) return
+
+			const deltaDays = Math.round((newStart - oldStart) / (1000 * 60 * 60 * 24))
+			if (deltaDays === 0) return
+
+			const movedEarlier = deltaDays < 0
+			const absDays = Math.abs(deltaDays)
+			const today = new Date()
+			today.setHours(0, 0, 0, 0)
+
+			// Upstream collision: task moved before its predecessor
+			if (movedEarlier && hasFollows) {
+				for (const pred of followsTasks!) {
+					if (!pred.startDate) continue
+					if (new Date(newStart) <= new Date(pred.startDate)) {
+						// Check past-date safety
+						const earliest = findEarliestDate(followsTasks!)
+						if (earliest) {
+							const shifted = new Date(earliest.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+							if (shifted < today) {
+								window.alert(`Cannot shift upstream — would move tasks to ${shifted.toLocaleDateString()}, which is in the past.`)
+								return
+							}
+						}
+						const confirmedUp = window.confirm(`This task is now before its predecessor. Shift upstream task(s) ${absDays} day(s) back?`)
+						if (confirmedUp) {
+							await cascadeShiftTasks(followsTasks!, deltaDays, 'follows')
+						}
+						break
+					}
+				}
+			}
+
+			// Downstream cascade
+			if (hasPrecedes) {
+				if (movedEarlier) {
+					const earliest = findEarliestDate(precedesTasks!)
+					if (earliest) {
+						const shifted = new Date(earliest.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+						if (shifted < today) {
+							window.alert(`Cannot shift downstream — would move tasks to ${shifted.toLocaleDateString()}, which is in the past.`)
+							return
+						}
+					}
+				}
+				const direction = deltaDays > 0 ? 'forward' : 'back'
+				const confirmed = window.confirm(`Shift ${precedesTasks!.length} downstream task(s) ${absDays} day(s) ${direction}?`)
+				if (confirmed) {
+					await cascadeShiftTasks(precedesTasks!, deltaDays, 'precedes')
+				}
+			}
+		} catch (e) {
+			console.error('Failed to check cascade:', e)
+		}
+	}
+
+	function findEarliestDate(tasks: ITask[]): Date | null {
+		let earliest: Date | null = null
+		for (const t of tasks) {
+			if (t.startDate) {
+				const d = new Date(t.startDate)
+				if (!earliest || d < earliest) earliest = d
+			}
+		}
+		return earliest
+	}
+
+	async function cascadeShiftTasks(chainTasks: ITask[], deltaDays: number, direction: 'precedes' | 'follows') {
+		const deltaMs = deltaDays * 24 * 60 * 60 * 1000
+
+		for (const t of chainTasks) {
+			const shiftedTask: Record<string, any> = {id: t.id}
+
+			if (t.startDate) {
+				shiftedTask.startDate = new Date(new Date(t.startDate).getTime() + deltaMs)
+			}
+			if (t.endDate) {
+				shiftedTask.endDate = new Date(new Date(t.endDate).getTime() + deltaMs)
+			}
+			if (t.dueDate) {
+				shiftedTask.dueDate = new Date(new Date(t.dueDate).getTime() + deltaMs)
+			}
+
+			try {
+				const updated = await taskService.update({...t, ...shiftedTask})
+				tasks.value.set(updated.id, updated)
+
+				try {
+					const full = await taskService.get(new TaskModel({id: updated.id}))
+					const nextTasks = full?.relatedTasks?.[direction]
+					if (nextTasks && Array.isArray(nextTasks) && nextTasks.length > 0) {
+						await cascadeShiftTasks(nextTasks, deltaDays, direction)
+					}
+				} catch {
+					// End of chain
+				}
+			} catch (e) {
+				console.error(`Failed to cascade task ${downstream.id}:`, e)
+			}
 		}
 	}
 
