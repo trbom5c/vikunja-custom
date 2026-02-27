@@ -124,6 +124,7 @@ func FullInit() {
 	models.RegisterOldExportCleanupCron()
 	models.RegisterAddTaskToFilterViewCron()
 	user.RegisterTokenCleanupCron()
+	models.RegisterSessionCleanupCron()
 	user.RegisterDeletionNotificationCron()
 	openid.CleanupSavedOpenIDProviders()
 	openid.RegisterEmptyOpenIDTeamCleanupCron()
