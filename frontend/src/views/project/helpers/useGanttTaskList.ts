@@ -27,6 +27,7 @@ export function useGanttTaskList<F extends Filters>(
 	filterToApiParams: (filters: F) => TaskFilterParams,
 	viewId: Ref<IProjectView['id']>,
 	loadAll: boolean = true,
+	extraParams?: Ref<Record<string, unknown>>,
 ) : UseGanttTaskListReturn {
 	const taskCollectionService = shallowReactive(new TaskCollectionService())
 	const taskService = shallowReactive(new TaskService())
@@ -41,8 +42,13 @@ export function useGanttTaskList<F extends Filters>(
 		if (params.filter_timezone === '') {
 			params.filter_timezone = authStore.settings.timezone
 		}
+
+		// Merge any extra params (e.g. include_subprojects, exclude_project_ids)
+		const mergedParams = extraParams?.value
+			? {...params, ...extraParams.value}
+			: params
 		
-		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, params, page) as ITask[]
+		const tasks = await taskCollectionService.getAll({projectId: filters.value.projectId, viewId: viewId.value}, mergedParams, page) as ITask[]
 		if (loadAll && page < taskCollectionService.totalPages) {
 			const nextTasks = await fetchTasks(params, page + 1)
 			return tasks.concat(nextTasks)
@@ -108,10 +114,106 @@ export function useGanttTaskList<F extends Filters>(
 			// update the task with possible changes from server
 			tasks.value.set(updatedTask.id, updatedTask)
 			success('Saved')
+
+			// Check for date cascade: if start or end date changed, check for downstream chain tasks
+			const startChanged = oldTask.startDate?.toString() !== newTask.startDate?.toString()
+			const endChanged = oldTask.endDate?.toString() !== newTask.endDate?.toString()
+
+			if (startChanged || endChanged) {
+				await checkCascadeDownstream(updatedTask, oldTask)
+			}
 		} catch (_) {
 			error('Something went wrong saving the task')
 			// roll back changes
 			tasks.value.set(task.id, oldTask)
+		}
+	}
+
+	async function checkCascadeDownstream(updatedTask: ITask, oldTask: ITask) {
+		try {
+			const fullTask = await taskService.get(new TaskModel({id: updatedTask.id}))
+			// "precedes" = tasks that come AFTER this one (downstream successors)
+			const successors = fullTask?.relatedTasks?.precedes
+
+			if (!successors || !Array.isArray(successors) || successors.length === 0) return
+
+			const oldStart = oldTask.startDate ? new Date(oldTask.startDate).getTime() : 0
+			const newStart = updatedTask.startDate ? new Date(updatedTask.startDate).getTime() : 0
+			if (oldStart === 0 || newStart === 0) return
+
+			const deltaDays = Math.round((newStart - oldStart) / (1000 * 60 * 60 * 24))
+			if (deltaDays === 0) return
+
+			const absDays = Math.abs(deltaDays)
+			const direction = deltaDays > 0 ? 'forward' : 'back'
+
+			// Past-date safety check
+			if (deltaDays < 0) {
+				const today = new Date()
+				today.setHours(0, 0, 0, 0)
+				const earliest = findEarliestDate(successors)
+				if (earliest) {
+					const shifted = new Date(earliest.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+					if (shifted < today) {
+						window.alert(`Cannot shift downstream — would move tasks to ${shifted.toLocaleDateString()}, which is in the past.`)
+						return
+					}
+				}
+			}
+
+			const confirmed = window.confirm(`Shift ${successors.length} downstream task(s) ${absDays} day(s) ${direction}?`)
+			if (confirmed) {
+				await cascadeShiftDownstream(successors, deltaDays)
+			}
+		} catch (e) {
+			console.error('Failed to check cascade:', e)
+		}
+	}
+
+	function findEarliestDate(tasks: ITask[]): Date | null {
+		let earliest: Date | null = null
+		for (const t of tasks) {
+			if (t.startDate) {
+				const d = new Date(t.startDate)
+				if (!earliest || d < earliest) earliest = d
+			}
+		}
+		return earliest
+	}
+
+	async function cascadeShiftDownstream(successors: ITask[], deltaDays: number) {
+		const deltaMs = deltaDays * 24 * 60 * 60 * 1000
+
+		for (const t of successors) {
+			const shiftedTask: Record<string, any> = {id: t.id}
+
+			if (t.startDate) {
+				shiftedTask.startDate = new Date(new Date(t.startDate).getTime() + deltaMs)
+			}
+			if (t.endDate) {
+				shiftedTask.endDate = new Date(new Date(t.endDate).getTime() + deltaMs)
+			}
+			if (t.dueDate) {
+				shiftedTask.dueDate = new Date(new Date(t.dueDate).getTime() + deltaMs)
+			}
+
+			try {
+				const updated = await taskService.update({...t, ...shiftedTask})
+				tasks.value.set(updated.id, updated)
+
+				// Continue downstream: get THIS task's successors (precedes)
+				try {
+					const full = await taskService.get(new TaskModel({id: updated.id}))
+					const nextSuccessors = full?.relatedTasks?.precedes
+					if (nextSuccessors && Array.isArray(nextSuccessors) && nextSuccessors.length > 0) {
+						await cascadeShiftDownstream(nextSuccessors, deltaDays)
+					}
+				} catch {
+					// End of chain
+				}
+			} catch (e) {
+				console.error(`Failed to cascade task ${t.id}:`, e)
+			}
 		}
 	}
 
