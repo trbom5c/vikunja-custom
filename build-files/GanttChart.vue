@@ -69,6 +69,18 @@
 			</GanttChartBody>
 		</div>
 
+		<!-- Drag date range tooltip (shows projected dates while dragging) -->
+		<div
+			v-if="isDragging && dragState && dragDateRange"
+			class="drag-date-tooltip"
+			:style="{
+				left: dragDateTooltipX + 'px',
+				top: dragDateTooltipY + 'px',
+			}"
+		>
+			{{ dragDateRange }}
+		</div>
+
 		<!-- Drag confirm scrim (move phase only — cascade has no blocking scrim) -->
 		<div
 			v-if="dragConfirm && dragConfirm.phase === 'move'"
@@ -185,6 +197,51 @@ const dragState = ref<{
 	currentDays: number
 	edge?: 'start' | 'end'
 } | null>(null)
+
+// Drag date range tooltip
+const dragDateTooltipX = ref(0)
+const dragDateTooltipY = ref(0)
+
+function formatShortDate(d: Date): string {
+	const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+	return `${months[d.getMonth()]} ${d.getDate()}`
+}
+
+const dragDateRange = computed(() => {
+	if (!dragState.value || !isDragging.value) return ''
+	const deltaMs = dragState.value.currentDays * 24 * 60 * 60 * 1000
+	const newStart = new Date(dragState.value.originalStart.getTime() + deltaMs)
+	const newEnd = new Date(dragState.value.originalEnd.getTime() + deltaMs)
+	return `${formatShortDate(newStart)} – ${formatShortDate(newEnd)}`
+})
+
+// Update tooltip position via rAF during drag
+let dragTooltipRaf: number | null = null
+
+function startDragTooltipTracking() {
+	function tick() {
+		if (!isDragging.value || !dragState.value) {
+			dragTooltipRaf = null
+			return
+		}
+		const barEl = document.querySelector(`[data-task-id="${dragState.value.barId}"]`)
+		if (barEl) {
+			const rect = barEl.getBoundingClientRect()
+			dragDateTooltipX.value = rect.left + rect.width / 2
+			dragDateTooltipY.value = rect.bottom + 6
+		}
+		dragTooltipRaf = requestAnimationFrame(tick)
+	}
+	if (dragTooltipRaf) cancelAnimationFrame(dragTooltipRaf)
+	dragTooltipRaf = requestAnimationFrame(tick)
+}
+
+function stopDragTooltipTracking() {
+	if (dragTooltipRaf) {
+		cancelAnimationFrame(dragTooltipRaf)
+		dragTooltipRaf = null
+	}
+}
 
 let dragMoveHandler: ((e: PointerEvent) => void) | null = null
 let dragStopHandler: (() => void) | null = null
@@ -787,6 +844,7 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	}
 	
 	isDragging.value = true
+	startDragTooltipTracking()
 	dragState.value = {
 		barId: bar.id,
 		startX: event.clientX,
@@ -833,6 +891,7 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 		document.removeEventListener('touchcancel', handleStop)
 		dragMoveHandler = null
 		dragStopHandler = null
+		stopDragTooltipTracking()
 		
 		clearCursor(barElement)
 		
@@ -1019,6 +1078,7 @@ onUnmounted(() => {
 		dragStopHandler = null
 	}
 	document.body.style.removeProperty('cursor')
+	stopDragTooltipTracking()
 })
 
 // Pinch-to-zoom on touch devices
@@ -1129,6 +1189,23 @@ watch(ganttContainer, (el) => {
 }
 
 // Drag confirm bubble
+.drag-date-tooltip {
+	position: fixed;
+	transform: translateX(-50%);
+	padding: 2px 8px;
+	font-size: .65rem;
+	font-weight: 500;
+	color: var(--grey-200, #ddd);
+	background: var(--grey-800, #333);
+	border: 1px solid var(--grey-600, #555);
+	border-radius: 4px;
+	white-space: nowrap;
+	pointer-events: none;
+	z-index: 85;
+	opacity: 0.9;
+	letter-spacing: 0.02em;
+}
+
 .drag-confirm-scrim {
 	position: fixed;
 	inset: 0;
