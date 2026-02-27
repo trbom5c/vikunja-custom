@@ -400,8 +400,9 @@ function getOverdueTooltip(bar: GanttBarModel): string {
 	const origStart = bar.meta?.originalStart as Date | undefined
 	const origEnd = bar.meta?.originalEnd as Date | undefined
 	const project = bar.meta?.projectName ? `[${bar.meta.projectName}] ` : ''
-	if (!origStart || !origEnd) return `${project}Overdue task`
-	return `${project}Overdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
+	const label = bar.meta?.label || 'Overdue task'
+	if (!origStart || !origEnd) return `${project}${label}`
+	return `${project}${label}\nOverdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
 }
 
 function getBarTooltip(bar: GanttBarModel): string {
