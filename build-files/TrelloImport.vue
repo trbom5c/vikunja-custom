@@ -68,14 +68,14 @@
 							<input v-model="options.kanbanMode" type="radio" value="simple" name="kanbanMode">
 							<div class="radio-content">
 								<span class="radio-title">Simple (To-Do / Done)</span>
-								<span class="radio-desc">Unfinished tasks go to "To-Do", completed tasks go to "Done" using default Kanban buckets</span>
+								<span class="radio-desc">Tasks go to sub-projects. Unfinished → "To-Do" bucket, completed → "Done" on each sub-project's Kanban.</span>
 							</div>
 						</label>
 						<label class="radio-option" :class="{ 'is-selected': options.kanbanMode === 'replicate' }">
 							<input v-model="options.kanbanMode" type="radio" value="replicate" name="kanbanMode">
 							<div class="radio-content">
 								<span class="radio-title">Replicate Trello Board</span>
-								<span class="radio-desc">Create Kanban columns matching your Trello lists on the parent project — cards placed in their original list's column</span>
+								<span class="radio-desc">1:1 Trello emulation — all tasks in one project with Kanban columns matching your Trello lists. No sub-projects created.</span>
 							</div>
 						</label>
 						<label class="radio-option" :class="{ 'is-selected': options.kanbanMode === 'none' }">
@@ -183,7 +183,7 @@
 			<p class="progress-text">{{ progressText }}</p>
 			<div v-if="importLog.length > 0" class="import-log">
 				<div
-					v-for="(entry, i) in importLog.slice(-8)"
+					v-for="(entry, i) in importLog.slice(-20)"
 					:key="i"
 					class="log-entry"
 					:class="entry.type"
@@ -719,9 +719,19 @@ async function startImport() {
 		// ─────────────────────────────────────────────────────
 		// PHASE 3: Create sub-projects for each Trello list
 		// Maps Trello list ID → Vikunja project ID.
+		//
+		// In 'replicate' kanban mode, we skip sub-projects
+		// entirely — all tasks go directly into the parent
+		// project so they appear on the parent Kanban board.
 		// ─────────────────────────────────────────────────────
 		const listProjectMap = new Map<string, number>()
-		if (options.value.listsAsSubProjects) {
+		if (options.value.kanbanMode === 'replicate') {
+			// Replicate mode: everything in parent project, no sub-projects
+			for (const list of selectedLists) {
+				listProjectMap.set(list.id, parentProject.id)
+			}
+			log('info', 'Replicate mode: all tasks will be created in parent project')
+		} else if (options.value.listsAsSubProjects) {
 			for (const list of selectedLists) {
 				updateProgress(`Creating list "${list.name}"...`)
 				try {
@@ -756,11 +766,10 @@ async function startImport() {
 		//   the default To-Do and Done buckets.  Tasks will be
 		//   assigned based on their completion status.
 		//
-		// 'replicate' — On the PARENT project's Kanban view,
-		//   replace the default buckets with one bucket per
-		//   selected Trello list.  Cards are placed into their
-		//   original list's column.  Subproject Kanbans also
-		//   get simple To-Do/Done assignment.
+		// 'replicate' — 1:1 Trello emulation.  No sub-projects.
+		//   On the parent project's Kanban view, replace the
+		//   default buckets with one per Trello list.  Cards go
+		//   directly into their original list's column.
 		//
 		// 'none' — Skip all bucket assignment.
 		// ─────────────────────────────────────────────────────
