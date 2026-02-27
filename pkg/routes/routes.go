@@ -227,8 +227,7 @@ func RegisterRoutes(e *echo.Echo) {
 			UnsafeAllowOriginFunc: func(_ *echo.Context, origin string) (string, bool, error) {
 				return matchCORSOrigin(origin, allowedOrigins)
 			},
-			AllowCredentials: true,
-			MaxAge:           config.CorsMaxAge.GetInt(),
+			MaxAge: config.CorsMaxAge.GetInt(),
 			Skipper: func(context *echo.Context) bool {
 				// Since it is not possible to register this middleware just for the api group,
 				// we just disable it when for caldav requests.
@@ -255,7 +254,6 @@ var unauthenticatedAPIPaths = map[string]bool{
 	"/api/v1/user/password/reset":            true,
 	"/api/v1/user/confirm":                   true,
 	"/api/v1/login":                          true,
-	"/api/v1/user/token/refresh":             true,
 	"/api/v1/auth/openid/:provider/callback": true,
 	"/api/v1/test/:table":                    true,
 	"/api/v1/info":                           true,
@@ -284,17 +282,6 @@ func collectRoutesForAPITokens(e *echo.Echo) {
 }
 
 func registerAPIRoutes(a *echo.Group) {
-
-	// Prevent browsers from caching API responses. Without an explicit
-	// Cache-Control header browsers may heuristically cache JSON responses
-	// which causes stale data (e.g. newly team-shared projects not appearing
-	// until a hard refresh).
-	a.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			c.Response().Header().Set("Cache-Control", "no-store")
-			return next(c)
-		}
-	})
 
 	// This is the group with no auth
 	// It is its own group to be able to rate limit this based on different heuristics
@@ -327,10 +314,6 @@ func registerAPIRoutes(a *echo.Group) {
 	if config.AuthLocalEnabled.GetBool() || config.AuthLdapEnabled.GetBool() {
 		ur.POST("/login", apiv1.Login)
 	}
-
-	// Refresh token endpoint — unauthenticated because it uses the refresh
-	// token cookie instead of a JWT bearer token.
-	ur.POST("/user/token/refresh", apiv1.RefreshToken)
 
 	if config.AuthOpenIDEnabled.GetBool() {
 		ur.POST("/auth/openid/:provider/callback", openid.HandleCallback)
@@ -372,12 +355,14 @@ func registerAPIRoutes(a *echo.Group) {
 	u.POST("/password", apiv1.UserChangePassword)
 	u.GET("s", apiv1.UserList)
 	u.POST("/token", apiv1.RenewToken)
-	u.POST("/logout", apiv1.Logout)
 	u.POST("/settings/email", apiv1.UpdateUserEmail)
 	u.GET("/settings/avatar", apiv1.GetUserAvatarProvider)
 	u.POST("/settings/avatar", apiv1.ChangeUserAvatarProvider)
 	u.PUT("/settings/avatar/upload", apiv1.UploadAvatar)
 	u.POST("/settings/general", apiv1.UpdateGeneralUserSettings)
+	u.GET("/settings/preferences", apiv1.GetUserPreferences)
+	u.POST("/settings/preferences", apiv1.SaveUserPreferences)
+	u.DELETE("/settings/preferences/:key", apiv1.DeleteUserPreference)
 	u.POST("/export/request", apiv1.RequestUserDataExport)
 	u.POST("/export/download", apiv1.DownloadUserDataExport)
 	u.GET("/export", apiv1.GetUserExportStatus)
@@ -385,14 +370,6 @@ func registerAPIRoutes(a *echo.Group) {
 	u.PUT("/settings/token/caldav", apiv1.GenerateCaldavToken)
 	u.GET("/settings/token/caldav", apiv1.GetCaldavTokens)
 	u.DELETE("/settings/token/caldav/:id", apiv1.DeleteCaldavToken)
-
-	sessionProvider := &handler.WebHandler{
-		EmptyStruct: func() handler.CObject {
-			return &models.Session{}
-		},
-	}
-	u.GET("/sessions", sessionProvider.ReadAllWeb)
-	u.DELETE("/sessions/:session", sessionProvider.DeleteWeb)
 
 	if config.ServiceEnableTotp.GetBool() {
 		u.GET("/settings/totp", apiv1.UserTOTP)
@@ -457,6 +434,72 @@ func registerAPIRoutes(a *echo.Group) {
 		},
 	}
 	a.PUT("/projects/:projectid/duplicate", projectDuplicateHandler.CreateWeb)
+
+	taskDuplicateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskDuplicate{}
+		},
+	}
+	a.PUT("/tasks/:task/duplicate", taskDuplicateHandler.CreateWeb)
+
+	taskTemplateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskTemplate{}
+		},
+	}
+	a.GET("/tasktemplates", taskTemplateHandler.ReadAllWeb)
+	a.GET("/tasktemplates/:template", taskTemplateHandler.ReadOneWeb)
+	a.PUT("/tasktemplates", taskTemplateHandler.CreateWeb)
+	a.POST("/tasktemplates/:template", taskTemplateHandler.UpdateWeb)
+	a.DELETE("/tasktemplates/:template", taskTemplateHandler.DeleteWeb)
+
+	taskFromTemplateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskFromTemplate{}
+		},
+	}
+	a.PUT("/tasktemplates/:template/tasks", taskFromTemplateHandler.CreateWeb)
+
+	// --- Task Chains ---
+	taskChainHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskChain{}
+		},
+	}
+	a.GET("/taskchains", taskChainHandler.ReadAllWeb)
+	a.GET("/taskchains/:chain", taskChainHandler.ReadOneWeb)
+	a.PUT("/taskchains", taskChainHandler.CreateWeb)
+	a.POST("/taskchains/:chain", taskChainHandler.UpdateWeb)
+	a.DELETE("/taskchains/:chain", taskChainHandler.DeleteWeb)
+
+	taskFromChainHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskFromChain{}
+		},
+	}
+	a.PUT("/taskchains/:chain/tasks", taskFromChainHandler.CreateWeb)
+
+	// Chain step attachments
+	a.PUT("/chainsteps/:step/attachments", apiv1.UploadChainStepAttachment)
+	a.DELETE("/chainsteps/:step/attachments/:attachment", apiv1.DeleteChainStepAttachment)
+
+	// --- Auto-Generated Tasks ---
+	autoTaskHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.AutoTaskTemplate{}
+		},
+	}
+	a.GET("/autotasks", autoTaskHandler.ReadAllWeb)
+	a.GET("/autotasks/:autotask", autoTaskHandler.ReadOneWeb)
+	a.PUT("/autotasks", autoTaskHandler.CreateWeb)
+	a.POST("/autotasks/:autotask", autoTaskHandler.UpdateWeb)
+	a.DELETE("/autotasks/:autotask", autoTaskHandler.DeleteWeb)
+
+	// Auto-task manual trigger and auto-check
+	a.POST("/autotasks/:autotask/trigger", apiv1.TriggerAutoTask)
+	a.POST("/autotasks/check", apiv1.CheckAutoTasks)
+	a.POST("/autotasks/:autotask/log/truncate", apiv1.TruncateAutoTaskLog)
+	a.POST("/autotasks/:autotask/reset", apiv1.HandleResetAutoTaskSchedule)
 
 	taskHandler := &handler.WebHandler{
 		EmptyStruct: func() handler.CObject {

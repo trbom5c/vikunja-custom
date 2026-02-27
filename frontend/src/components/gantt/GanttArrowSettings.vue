@@ -1,0 +1,587 @@
+<template>
+	<div class="arrow-settings-wrapper">
+		<button
+			class="arrow-settings-toggle"
+			:class="{ active: isOpen }"
+			:title="$t('gantt.arrows.toggleTitle')"
+			@click="isOpen = !isOpen"
+		>
+			<icon icon="sitemap" />
+		</button>
+
+		<div
+			v-if="isOpen"
+			class="arrow-settings-panel"
+		>
+			<div class="panel-header">
+				<span class="panel-title">Gantt Settings</span>
+				<button class="panel-close" @click="isOpen = false">✕</button>
+			</div>
+
+			<!-- ═══ USER PREFERENCES ═══ -->
+			<div class="setting-section">
+				<div class="section-label">Drag & Cascade</div>
+				<div class="setting-row">
+					<label>Cascade Mode</label>
+					<select v-model="cascadeMode" class="setting-select">
+						<option value="bulk">Shift all at once</option>
+						<option value="individual">Confirm each task</option>
+					</select>
+				</div>
+				<div class="setting-hint">
+					{{ cascadeMode === 'bulk' ? 'One confirm shifts all downstream tasks together' : 'You\'ll confirm each affected task individually' }}
+				</div>
+				<div class="setting-row">
+					<label>Prompt Style</label>
+					<select v-model="cascadeStyle" class="setting-select">
+						<option value="toast">Sticky Toast</option>
+						<option value="modal">Dialog Box</option>
+					</select>
+				</div>
+				<div class="setting-hint">How cascade shift prompts appear when dragging tasks</div>
+			</div>
+
+			<!-- ═══ ARROW CONFIG (collapsible) ═══ -->
+			<div class="setting-section collapsible-header" @click="arrowConfigOpen = !arrowConfigOpen">
+				<div class="section-label" style="cursor: pointer; display: flex; align-items: center; gap: 6px;">
+					<span class="collapse-caret" :class="{ open: arrowConfigOpen }">▶</span>
+					Arrow Settings
+				</div>
+			</div>
+
+			<template v-if="arrowConfigOpen">
+			<!-- Master Enable/Disable -->
+			<div class="setting-section master-toggle">
+				<div class="setting-row toggle-row">
+					<label>
+						<input v-model="config.enabled" type="checkbox">
+						<strong>{{ $t('gantt.arrows.showArrows') }}</strong>
+					</label>
+				</div>
+			</div>
+
+			<!-- All other settings — disabled when arrows off -->
+			<div :class="{ 'settings-disabled': !config.enabled }">
+
+				<!-- Path Mode -->
+				<div class="setting-section">
+					<div class="section-label">{{ $t('gantt.arrows.pathMode') }}</div>
+					<select v-model="config.pathMode" class="setting-select" :disabled="!config.enabled">
+						<option value="bezier">{{ $t('gantt.arrows.pathMode.bezier') }}</option>
+						<option value="stepped">{{ $t('gantt.arrows.pathMode.stepped') }}</option>
+						<option value="stepRounded">{{ $t('gantt.arrows.pathMode.stepRounded') }}</option>
+					</select>
+				</div>
+
+				<!-- Line Style -->
+				<div class="setting-section">
+					<div class="section-label">{{ $t('gantt.arrows.lineStyle') }}</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.stroke') }}</label>
+						<input v-model.number="config.strokeWidth" type="range" min="0.5" max="4" step="0.25" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.strokeWidth }}</span>
+					</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.dash') }}</label>
+						<select v-model="config.dashArray" class="setting-select" :disabled="!config.enabled">
+							<option value="4,2">{{ $t('gantt.arrows.dash.default') }}</option>
+							<option value="6,3">{{ $t('gantt.arrows.dash.long') }}</option>
+							<option value="2,2">{{ $t('gantt.arrows.dash.short') }}</option>
+							<option value="8,4">{{ $t('gantt.arrows.dash.wide') }}</option>
+							<option value="4,2,1,2">{{ $t('gantt.arrows.dash.dotDash') }}</option>
+							<option value="none">{{ $t('gantt.arrows.dash.solid') }}</option>
+						</select>
+					</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.opacity') }}</label>
+						<input v-model.number="config.opacity" type="range" min="0.1" max="1" step="0.05" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.opacity }}</span>
+					</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.arrowSize') }}</label>
+						<input v-model.number="config.arrowSize" type="range" min="4" max="16" step="1" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.arrowSize }}</span>
+					</div>
+				</div>
+
+				<!-- Exit/Entry Edge — applies to ALL modes -->
+				<div class="setting-section">
+					<div class="section-label exit-label">{{ $t('gantt.arrows.exitSource') }}</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.edge') }}</label>
+						<select v-model="config.exitDir" class="setting-select" :disabled="!config.enabled">
+							<option value="right">{{ $t('gantt.arrows.edge.right') }}</option>
+							<option value="bottom">{{ $t('gantt.arrows.edge.bottom') }}</option>
+						</select>
+					</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.anchor') }}</label>
+						<input v-model.number="config.exitOffset" type="range" min="0" max="1" step="0.05" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.exitOffset }}</span>
+					</div>
+					<div class="setting-hint">{{ config.exitDir === 'bottom' ? $t('gantt.arrows.anchorHint.vertical') : $t('gantt.arrows.anchorHint.horizontal') }}</div>
+					<div class="setting-row" v-if="config.pathMode !== 'bezier'">
+						<label>{{ $t('gantt.arrows.length') }}</label>
+						<input v-model.number="config.exitLength" type="range" min="5" max="120" step="5" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.exitLength }}</span>
+					</div>
+				</div>
+
+				<div class="setting-section">
+					<div class="section-label entry-label">{{ $t('gantt.arrows.entryTarget') }}</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.edge') }}</label>
+						<select v-model="config.entryDir" class="setting-select" :disabled="!config.enabled">
+							<option value="left">{{ $t('gantt.arrows.edge.left') }}</option>
+							<option value="top">{{ $t('gantt.arrows.edge.top') }}</option>
+						</select>
+					</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.anchor') }}</label>
+						<input v-model.number="config.entryOffset" type="range" min="0" max="1" step="0.05" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.entryOffset }}</span>
+					</div>
+					<div class="setting-hint">{{ config.entryDir === 'left' ? $t('gantt.arrows.anchorHint.horizontal') : $t('gantt.arrows.anchorHint.vertical') }}</div>
+					<div class="setting-row" v-if="config.pathMode !== 'bezier'">
+						<label>{{ $t('gantt.arrows.length') }}</label>
+						<input v-model.number="config.entryLength" type="range" min="5" max="120" step="5" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.entryLength }}</span>
+					</div>
+				</div>
+
+				<!-- Bezier-specific: curve control points -->
+				<template v-if="config.pathMode === 'bezier'">
+					<div class="setting-section">
+						<div class="section-label cp1-label">{{ $t('gantt.arrows.cp1Label') }}</div>
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.horiz') }}</label>
+							<input v-model.number="config.cp1X" type="range" min="0.05" max="0.95" step="0.05" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.cp1X }}</span>
+						</div>
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.vert') }}</label>
+							<input v-model.number="config.cp1Y" type="range" min="-200" max="200" step="5" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.cp1Y }}</span>
+						</div>
+						<div class="setting-hint">{{ $t('gantt.arrows.cp1Hint') }}</div>
+					</div>
+					<div class="setting-section">
+						<div class="section-label cp2-label">{{ $t('gantt.arrows.cp2Label') }}</div>
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.horiz') }}</label>
+							<input v-model.number="config.cp2X" type="range" min="0.05" max="0.95" step="0.05" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.cp2X }}</span>
+						</div>
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.vert') }}</label>
+							<input v-model.number="config.cp2Y" type="range" min="-200" max="200" step="5" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.cp2Y }}</span>
+						</div>
+						<div class="setting-hint">{{ $t('gantt.arrows.cp2Hint') }}</div>
+					</div>
+				</template>
+
+				<!-- Stepped-specific: corner radius -->
+				<div class="setting-section" v-if="config.pathMode === 'stepRounded'">
+					<div class="section-label">{{ $t('gantt.arrows.corners') }}</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.radius') }}</label>
+						<input v-model.number="config.cornerRadius" type="range" min="0" max="20" step="1" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.cornerRadius }}</span>
+					</div>
+				</div>
+
+				<!-- Appearance -->
+				<div class="setting-section">
+					<div class="section-label">{{ $t('gantt.arrows.appearance') }}</div>
+					<div class="setting-row">
+						<label>{{ $t('gantt.arrows.colors') }}</label>
+						<select v-model="config.palette" class="setting-select" :disabled="!config.enabled">
+							<option value="multi">{{ $t('gantt.arrows.colors.multi') }}</option>
+							<option value="mono">{{ $t('gantt.arrows.colors.mono') }}</option>
+						</select>
+					</div>
+				</div>
+
+				<!-- Extras -->
+				<div class="setting-section">
+					<div class="section-label">{{ $t('gantt.arrows.extras') }}</div>
+					<div class="setting-row toggle-row">
+						<label>
+							<input v-model="config.showDots" type="checkbox" :disabled="!config.enabled">
+							{{ $t('gantt.arrows.sourceDots') }}
+						</label>
+					</div>
+					<div class="setting-row" v-if="config.showDots">
+						<label>{{ $t('gantt.arrows.dotSize') }}</label>
+						<input v-model.number="config.dotRadius" type="range" min="1" max="6" step="0.5" :disabled="!config.enabled">
+						<span class="setting-val">{{ config.dotRadius }}</span>
+					</div>
+					<div class="setting-row toggle-row">
+						<label>
+							<input v-model="config.showShadow" type="checkbox" :disabled="!config.enabled">
+							{{ $t('gantt.arrows.dropShadow') }}
+						</label>
+					</div>
+					<template v-if="config.showShadow">
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.shadowWidth') }}</label>
+							<input v-model.number="config.shadowWidth" type="range" min="2" max="8" step="0.5" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.shadowWidth }}</span>
+						</div>
+						<div class="setting-row">
+							<label>{{ $t('gantt.arrows.shadowOpacity') }}</label>
+							<input v-model.number="config.shadowOpacity" type="range" min="0.05" max="0.5" step="0.05" :disabled="!config.enabled">
+							<span class="setting-val">{{ config.shadowOpacity }}</span>
+						</div>
+					</template>
+				</div>
+
+			</div>
+			</template>
+
+			<!-- Actions -->
+			<div class="panel-actions">
+				<button class="action-btn" @click="resetToDefaults">{{ $t('gantt.arrows.reset') }}</button>
+				<button class="action-btn" @click="copyConfig">{{ $t('gantt.arrows.copy') }}</button>
+				<button class="action-btn" @click="showImport = !showImport">{{ $t('gantt.arrows.import') }}</button>
+			</div>
+			<div v-if="showImport" class="import-area">
+				<textarea
+					v-model="importJson"
+					:placeholder="$t('gantt.arrows.importPlaceholder')"
+					rows="3"
+				/>
+				<button class="action-btn" @click="doImport">{{ $t('gantt.arrows.apply') }}</button>
+			</div>
+			<div v-if="statusMsg" class="status-msg">{{ statusMsg }}</div>
+		</div>
+	</div>
+</template>
+
+<script setup lang="ts">
+import {ref, watch} from 'vue'
+import {useI18n} from 'vue-i18n'
+import {useGanttArrowConfig} from '@/composables/useGanttArrowConfig'
+import {useUserPreferences} from '@/composables/useUserPreferences'
+
+const {t} = useI18n({useScope: 'global'})
+const {config, resetToDefaults, importConfig, exportConfig} = useGanttArrowConfig()
+const prefs = useUserPreferences()
+
+const isOpen = ref(false)
+const showImport = ref(false)
+const importJson = ref('')
+const statusMsg = ref('')
+const arrowConfigOpen = ref(false)
+
+// Cascade prompt style preference
+const cascadeStyle = ref<'toast' | 'modal'>((() => {
+	const val = prefs.get('gantt-cascade-prompt-style', 'toast')
+	if (val === 'modal' || val === 'toast') return val
+	return 'toast'
+})())
+
+watch(cascadeStyle, (val) => {
+	prefs.set('gantt-cascade-prompt-style', val)
+	statusMsg.value = 'Saved'
+	setTimeout(() => statusMsg.value = '', 1500)
+})
+
+// Cascade mode: bulk (all at once) or individual (one by one)
+const cascadeMode = ref<'bulk' | 'individual'>((() => {
+	const val = prefs.get('gantt-cascade-mode', 'bulk')
+	if (val === 'bulk' || val === 'individual') return val
+	return 'bulk'
+})())
+
+watch(cascadeMode, (val) => {
+	prefs.set('gantt-cascade-mode', val)
+	statusMsg.value = 'Saved'
+	setTimeout(() => statusMsg.value = '', 1500)
+})
+
+function copyConfig() {
+	const json = exportConfig()
+	navigator.clipboard.writeText(json).then(() => {
+		statusMsg.value = t('gantt.arrows.copied')
+		setTimeout(() => statusMsg.value = '', 2000)
+	}).catch(() => {
+		statusMsg.value = t('gantt.arrows.copyFailed')
+	})
+}
+
+function doImport() {
+	importConfig(importJson.value)
+	showImport.value = false
+	importJson.value = ''
+	statusMsg.value = t('gantt.arrows.imported')
+	setTimeout(() => statusMsg.value = '', 2000)
+}
+</script>
+
+<style scoped lang="scss">
+.arrow-settings-wrapper {
+	position: relative;
+	display: inline-block;
+}
+
+.arrow-settings-toggle {
+	background: transparent;
+	border: 1px solid var(--grey-300);
+	border-radius: 4px;
+	color: var(--grey-500);
+	padding: 4px 8px;
+	cursor: pointer;
+	font-size: 0.8rem;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	transition: all 0.2s;
+
+	&:hover, &.active {
+		color: var(--primary);
+		border-color: var(--primary);
+		background: rgba(var(--primary-rgb, 93, 165, 218), 0.08);
+	}
+}
+
+.arrow-settings-panel {
+	position: absolute;
+	top: 100%;
+	right: 0;
+	margin-top: 4px;
+	width: 300px;
+	max-height: 75vh;
+	overflow-y: auto;
+	background: var(--grey-100);
+	border: 1px solid var(--grey-300);
+	border-radius: 8px;
+	padding: 0;
+	z-index: 100;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+
+	.is-dark-mode & {
+		background: rgba(25, 27, 38, 0.98);
+		border-color: rgba(100, 120, 200, 0.3);
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+	}
+}
+
+.panel-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--grey-200);
+
+	.is-dark-mode & {
+		border-color: rgba(100, 120, 200, 0.15);
+	}
+}
+
+.panel-title {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--grey-800);
+
+	.is-dark-mode & { color: #aab; }
+}
+
+.panel-close {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--grey-500);
+	font-size: 14px;
+	padding: 0 4px;
+
+	&:hover { color: var(--danger); }
+}
+
+.master-toggle {
+	background: rgba(var(--primary-rgb, 93, 165, 218), 0.05);
+
+	.is-dark-mode & {
+		background: rgba(93, 165, 218, 0.08);
+	}
+}
+
+.settings-disabled {
+	opacity: 0.4;
+	pointer-events: none;
+}
+
+.setting-section {
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--grey-200);
+
+	.is-dark-mode & {
+		border-color: rgba(100, 120, 200, 0.1);
+	}
+}
+
+.collapsible-header {
+	cursor: pointer;
+	user-select: none;
+
+	&:hover {
+		background: rgba(100, 120, 200, 0.05);
+	}
+}
+
+.collapse-caret {
+	font-size: 8px;
+	transition: transform 0.2s;
+	display: inline-block;
+
+	&.open {
+		transform: rotate(90deg);
+	}
+}
+
+.section-label {
+	font-size: 9px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--grey-500);
+	margin-bottom: 4px;
+
+	.is-dark-mode & { color: #668; }
+
+	&.cp1-label { color: #e77; }
+	&.cp2-label { color: #77e; }
+	&.exit-label { color: #e77; }
+	&.entry-label { color: #77e; }
+}
+
+.setting-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+
+	label {
+		flex: 0 0 55px;
+		font-size: 11px;
+		color: var(--grey-600);
+
+		.is-dark-mode & { color: #99a; }
+	}
+
+	input[type="range"] {
+		flex: 1;
+		height: 3px;
+		accent-color: var(--primary);
+	}
+
+	&.toggle-row label {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		cursor: pointer;
+		font-size: 11px;
+
+		input[type="checkbox"] {
+			accent-color: var(--primary);
+		}
+
+		strong {
+			font-weight: 600;
+		}
+	}
+}
+
+.setting-val {
+	flex: 0 0 35px;
+	text-align: right;
+	font-size: 10px;
+	font-family: monospace;
+	color: var(--primary);
+}
+
+.setting-hint {
+	font-size: 9px;
+	color: var(--grey-400);
+	margin: -2px 0 4px 0;
+
+	.is-dark-mode & { color: #556; }
+}
+
+.setting-select {
+	flex: 1;
+	background: var(--grey-100);
+	border: 1px solid var(--grey-300);
+	border-radius: 4px;
+	padding: 2px 4px;
+	font-size: 11px;
+	color: var(--grey-700);
+
+	.is-dark-mode & {
+		background: rgba(40, 42, 55, 0.9);
+		border-color: rgba(100, 120, 200, 0.2);
+		color: #ccd;
+	}
+}
+
+.panel-actions {
+	display: flex;
+	gap: 4px;
+	padding: 8px 12px;
+}
+
+.action-btn {
+	flex: 1;
+	padding: 4px 8px;
+	border: 1px solid var(--grey-300);
+	border-radius: 4px;
+	background: var(--grey-100);
+	color: var(--grey-600);
+	font-size: 10px;
+	cursor: pointer;
+	text-align: center;
+
+	&:hover {
+		background: var(--grey-200);
+		color: var(--grey-800);
+	}
+
+	.is-dark-mode & {
+		background: rgba(50, 55, 80, 0.6);
+		border-color: rgba(100, 120, 200, 0.2);
+		color: #aab;
+
+		&:hover {
+			background: rgba(70, 75, 110, 0.7);
+		}
+	}
+}
+
+.import-area {
+	padding: 0 12px 8px;
+
+	textarea {
+		width: 100%;
+		font-family: monospace;
+		font-size: 10px;
+		border: 1px solid var(--grey-300);
+		border-radius: 4px;
+		padding: 4px;
+		resize: vertical;
+		margin-bottom: 4px;
+
+		.is-dark-mode & {
+			background: rgba(30, 32, 45, 0.8);
+			border-color: rgba(100, 120, 200, 0.2);
+			color: #ccd;
+		}
+	}
+}
+
+.status-msg {
+	padding: 0 12px 8px;
+	font-size: 10px;
+	color: var(--success);
+}
+</style>

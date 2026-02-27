@@ -32,6 +32,13 @@
 			>
 				<template #default="{ focusedRow, focusedCell }">
 					<div class="gantt-rows">
+						<GanttDependencyArrows
+							:bars-by-row="ganttBars"
+							:tasks="tasks"
+							:date-from="dateFromDate"
+							:day-width-pixels="DAY_WIDTH_PIXELS"
+							:total-width="totalWidth"
+						/>
 						<GanttRow
 							v-for="(rowId, index) in ganttRows"
 							:id="rowId"
@@ -61,9 +68,64 @@
 				</template>
 			</GanttChartBody>
 		</div>
+
+		<!-- Drag date range tooltip (shows projected dates while dragging) -->
+		<div
+			v-if="isDragging && dragState && dragDateRange"
+			class="drag-date-tooltip"
+			:style="{
+				left: dragDateTooltipX + 'px',
+				top: dragDateTooltipY + 'px',
+			}"
+		>
+			{{ dragDateRange }}
+		</div>
+
+		<!-- Drag confirm scrim (move phase only — cascade has no blocking scrim) -->
+		<div
+			v-if="dragConfirm && dragConfirm.phase === 'move'"
+			class="drag-confirm-scrim"
+			@click="cancelDrag"
+		/>
+		<Transition name="bubble">
+			<div
+				v-if="dragConfirm"
+				class="drag-confirm-bubble"
+				:style="{
+					left: bubbleX + 'px',
+					top: bubbleY + 'px',
+				}"
+				:class="{ 'cascade-phase': dragConfirm.phase === 'cascade' }"
+			>
+				<!-- Move phase -->
+				<template v-if="dragConfirm.phase === 'move'">
+					<span class="drag-confirm-label">{{ dragConfirm.taskName }}</span>
+					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
+					<button class="drag-confirm-btn confirm" title="Confirm move" @click="confirmDrag">✓</button>
+					<button class="drag-confirm-btn cancel" title="Cancel move" @click="cancelDrag">✕</button>
+				</template>
+				<!-- Cascade phase (bulk) -->
+				<template v-else-if="dragConfirm.phase === 'cascade' && !dragConfirm.isIndividual">
+					<span class="drag-confirm-cascade-icon" :style="{color: dragConfirm.cascadeAccentColor || '#7e7'}">↓</span>
+					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
+					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
+					<button class="drag-confirm-btn confirm" title="Shift all downstream tasks" @click="confirmCascadeAll">✓ All</button>
+					<button class="drag-confirm-btn cancel" title="Skip cascade" @click="cancelDrag">✕</button>
+				</template>
+				<!-- Cascade phase (individual) -->
+				<template v-else-if="dragConfirm.phase === 'cascade' && dragConfirm.isIndividual">
+					<span class="drag-confirm-cascade-icon" :style="{color: dragConfirm.cascadeAccentColor || '#7e7'}">↓</span>
+					<span class="drag-confirm-label">{{ dragConfirm.cascadeLabel }}</span>
+					<span class="drag-confirm-step">{{ dragConfirm.cascadeNames }}</span>
+					<span class="drag-confirm-detail">{{ dragConfirm.absDays }}d {{ dragConfirm.direction }}</span>
+					<button class="drag-confirm-btn confirm" title="Shift this task" @click="confirmCascadeIndividual">✓</button>
+					<button class="drag-confirm-btn skip" title="Skip this task" @click="skipCascadeIndividual">→</button>
+					<button class="drag-confirm-btn cancel" title="Cancel all remaining" @click="cancelDrag">✕</button>
+				</template>
+			</div>
+		</Transition>
 	</div>
 </template>
-
 <script setup lang="ts">
 import {computed, ref, watch, toRefs, onUnmounted} from 'vue'
 import {useRouter} from 'vue-router'
@@ -71,6 +133,7 @@ import dayjs from 'dayjs'
 import {useDayjsLanguageSync} from '@/i18n/useDayjsLanguageSync'
 
 import {getHexColor} from '@/models/task'
+import {useProjectStore} from '@/stores/projects'
 
 import type {ITask, ITaskPartialWithId} from '@/modelTypes/ITask'
 import type {DateISO} from '@/types/DateISO'
@@ -82,28 +145,40 @@ import GanttRow from '@/components/gantt/GanttRow.vue'
 import GanttRowBars from '@/components/gantt/GanttRowBars.vue'
 import GanttVerticalGridLines from '@/components/gantt/GanttVerticalGridLines.vue'
 import GanttTimelineHeader from '@/components/gantt/GanttTimelineHeader.vue'
+import GanttDependencyArrows from '@/components/gantt/GanttDependencyArrows.vue'
 import Loading from '@/components/misc/Loading.vue'
 
 import {MILLISECONDS_A_DAY} from '@/constants/date'
 import {roundToNaturalDayBoundary} from '@/helpers/time/roundToNaturalDayBoundary'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
 	isLoading: boolean,
 	filters: GanttFilters,
 	tasks: Map<ITask['id'], ITask>,
 	defaultTaskStartDate: DateISO
 	defaultTaskEndDate: DateISO
-}>()
+	subprojectColorMap?: Map<number, string>
+	cascadePreviews?: Array<{id: string, taskIds: Set<number>, deltaDays: number, direction: string, accentColor?: string}>
+}>(), {
+	subprojectColorMap: () => new Map(),
+	cascadePreviews: () => [],
+})
 
 const emit = defineEmits<{
   (e: 'update:task', task: ITaskPartialWithId): void
 }>()
 
-const DAY_WIDTH_PIXELS = 30
+const MIN_DAY_WIDTH = 10
+const MAX_DAY_WIDTH = 80
+const DEFAULT_DAY_WIDTH = 30
+const dayWidthPixels = ref(DEFAULT_DAY_WIDTH)
+// Keep a computed alias for the template (and legacy references)
+const DAY_WIDTH_PIXELS = computed(() => dayWidthPixels.value)
 
 const {tasks, filters} = toRefs(props)
 
 const dayjsLanguageLoading = useDayjsLanguageSync(dayjs)
+const projectStore = useProjectStore()
 const ganttContainer = ref(null)
 const ganttChartBodyRef = ref<InstanceType<typeof GanttChartBody> | null>(null)
 const router = useRouter()
@@ -123,15 +198,210 @@ const dragState = ref<{
 	edge?: 'start' | 'end'
 } | null>(null)
 
+// Drag date range tooltip
+const dragDateTooltipX = ref(0)
+const dragDateTooltipY = ref(0)
+
+function formatShortDate(d: Date): string {
+	const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+	return `${months[d.getMonth()]} ${d.getDate()}`
+}
+
+const dragDateRange = computed(() => {
+	if (!dragState.value || !isDragging.value) return ''
+	const deltaMs = dragState.value.currentDays * 24 * 60 * 60 * 1000
+	const newStart = new Date(dragState.value.originalStart.getTime() + deltaMs)
+	const newEnd = new Date(dragState.value.originalEnd.getTime() + deltaMs)
+	return `${formatShortDate(newStart)} – ${formatShortDate(newEnd)}`
+})
+
+// Update tooltip position via rAF during drag
+let dragTooltipRaf: number | null = null
+
+function startDragTooltipTracking() {
+	function tick() {
+		if (!isDragging.value || !dragState.value) {
+			dragTooltipRaf = null
+			return
+		}
+		const barEl = document.querySelector(`[data-task-id="${dragState.value.barId}"]`)
+		if (barEl) {
+			const rect = barEl.getBoundingClientRect()
+			dragDateTooltipX.value = rect.left + rect.width / 2
+			dragDateTooltipY.value = rect.bottom + 6
+		}
+		dragTooltipRaf = requestAnimationFrame(tick)
+	}
+	if (dragTooltipRaf) cancelAnimationFrame(dragTooltipRaf)
+	dragTooltipRaf = requestAnimationFrame(tick)
+}
+
+function stopDragTooltipTracking() {
+	if (dragTooltipRaf) {
+		cancelAnimationFrame(dragTooltipRaf)
+		dragTooltipRaf = null
+	}
+}
+
 let dragMoveHandler: ((e: PointerEvent) => void) | null = null
 let dragStopHandler: (() => void) | null = null
+
+// Drag confirm bubble — live-tracks bar position via rAF
+const dragConfirm = ref<{
+	barId: string
+	taskName: string
+	absDays: number
+	direction: string
+	originalStart: Date
+	originalEnd: Date
+	currentDays: number
+	phase: 'move' | 'cascade'
+	cascadeLabel?: string
+	cascadeNames?: string
+	cascadeAction?: () => void
+	cascadeSkip?: () => void
+	cascadeDismiss?: () => void
+	cascadeAccentColor?: string
+	isIndividual?: boolean
+	stepIndex?: number
+	stepTotal?: number
+} | null>(null)
+
+// Live position updated by rAF loop
+const bubbleX = ref(0)
+const bubbleY = ref(0)
+let bubbleRafId: number | null = null
+
+function updateBubblePosition() {
+	if (!dragConfirm.value) {
+		bubbleRafId = null
+		return
+	}
+	const container = ganttContainer.value as HTMLElement | null
+	if (container) {
+		const barEl = container.querySelector(`[data-task-id="${dragConfirm.value.barId}"]`)
+		if (barEl) {
+			const rect = barEl.getBoundingClientRect()
+			bubbleX.value = rect.left + rect.width / 2
+			bubbleY.value = rect.top - 8
+		}
+	}
+	bubbleRafId = requestAnimationFrame(updateBubblePosition)
+}
+
+watch(dragConfirm, (val) => {
+	if (val && !bubbleRafId) {
+		bubbleRafId = requestAnimationFrame(updateBubblePosition)
+	} else if (!val && bubbleRafId) {
+		cancelAnimationFrame(bubbleRafId)
+		bubbleRafId = null
+	}
+})
+
+onUnmounted(() => {
+	if (bubbleRafId) cancelAnimationFrame(bubbleRafId)
+})
+
+function confirmDrag() {
+	if (!dragConfirm.value) return
+
+	if (dragConfirm.value.phase === 'move') {
+		const {originalStart, originalEnd, currentDays, barId} = dragConfirm.value
+		const newStart = new Date(originalStart)
+		newStart.setDate(newStart.getDate() + currentDays)
+		const newEnd = new Date(originalEnd)
+		newEnd.setDate(newEnd.getDate() + currentDays)
+		updateGanttTask(barId, newStart, newEnd)
+		// Close bubble — cascade toast will appear separately
+		dragConfirm.value = null
+		isDragging.value = false
+		dragState.value = null
+	} else if (dragConfirm.value.phase === 'cascade') {
+		if (dragConfirm.value.cascadeAction) {
+			dragConfirm.value.cascadeAction()
+		}
+		dragConfirm.value = null
+	}
+}
+
+function confirmCascadeAll() {
+	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
+	if (dragConfirm.value.cascadeAction) {
+		dragConfirm.value.cascadeAction()
+	}
+	dragConfirm.value = null
+}
+
+function cancelDrag() {
+	if (dragConfirm.value?.phase === 'cascade') {
+		// Skip cascade — clean up ghost previews, then close
+		if (dragConfirm.value.cascadeDismiss) {
+			dragConfirm.value.cascadeDismiss()
+		}
+		dragConfirm.value = null
+	} else {
+		// Cancel move — snap bar back
+		dragConfirm.value = null
+		isDragging.value = false
+		dragState.value = null
+	}
+}
+
+// Expose function for composable to push cascade into the bubble
+function showCascadeInBubble(info: {label: string, names: string, absDays: number, direction: string, accentColor: string, action: () => void, skip?: () => void, dismiss?: () => void, barId?: string, stepIndex?: number, stepTotal?: number}) {
+	const targetBarId = info.barId || dragConfirm.value?.barId || ''
+	const isIndividual = info.stepIndex !== undefined && info.stepTotal !== undefined
+
+	dragConfirm.value = {
+		barId: targetBarId,
+		taskName: info.names,
+		absDays: info.absDays,
+		direction: info.direction,
+		originalStart: new Date(),
+		originalEnd: new Date(),
+		currentDays: 0,
+		phase: 'cascade',
+		cascadeLabel: info.label,
+		cascadeNames: info.names,
+		cascadeAccentColor: info.accentColor,
+		cascadeAction: info.action,
+		cascadeSkip: info.skip,
+		cascadeDismiss: info.dismiss,
+		isIndividual,
+		stepIndex: info.stepIndex,
+		stepTotal: info.stepTotal,
+	}
+}
+
+function confirmCascadeIndividual() {
+	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
+	if (dragConfirm.value.cascadeAction) {
+		dragConfirm.value.cascadeAction()
+	}
+	// Don't close bubble — action callback will call promptNext() which re-calls showCascadeInBubble
+}
+
+function skipCascadeIndividual() {
+	if (!dragConfirm.value || dragConfirm.value.phase !== 'cascade') return
+	if (dragConfirm.value.cascadeSkip) {
+		dragConfirm.value.cascadeSkip()
+	}
+	// Don't close bubble — skip callback will call promptNext() which re-calls showCascadeInBubble
+}
+
+function closeCascadeBubble() {
+	dragConfirm.value = null
+}
+
+// Expose to parent for composable access
+defineExpose({showCascadeInBubble, closeCascadeBubble})
 
 const dateFromDate = computed(() => dayjs(filters.value.dateFrom).startOf('day').toDate())
 const dateToDate = computed(() => dayjs(filters.value.dateTo).endOf('day').toDate())
 
 const totalWidth = computed(() => {
 	const dateDiff = Math.ceil((dateToDate.value.valueOf() - dateFromDate.value.valueOf()) / MILLISECONDS_A_DAY)
-	return dateDiff * DAY_WIDTH_PIXELS
+	return dateDiff * DAY_WIDTH_PIXELS.value
 })
 
 const timelineData = computed(() => {
@@ -192,7 +462,11 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 		dateType = 'both'
 	}
 
+	// Color cascade: task hex -> subprojectColorMap prop -> projectStore -> fallback
 	const taskColor = getHexColor(t.hexColor)
+	const subprojectColor = props.subprojectColorMap?.get(t.projectId) || null
+	const storeColor = getHexColor(projectStore.projects[t.projectId]?.hexColor ?? '')
+	const effectiveColor = taskColor || subprojectColor || storeColor || undefined
 
 	return {
 		id: String(t.id),
@@ -201,7 +475,7 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 		meta: {
 			label: t.title,
 			task: t,
-			color: taskColor,
+			color: effectiveColor,
 			hasActualDates: Boolean(t.startDate && (t.endDate || t.dueDate)),
 			dateType,
 			isDone: t.done,
@@ -209,8 +483,12 @@ function transformTaskToGanttBar(t: ITask): GanttBarModel {
 	}
 }
 
+// Reactive triggers: force bar re-render when color sources become available
+const projectStoreReady = computed(() => Object.keys(projectStore.projects).length)
+const colorMapReady = computed(() => props.subprojectColorMap?.size ?? 0)
+
 watch(
-	[tasks, filters],
+	[tasks, filters, colorMapReady, projectStoreReady],
 	() => {
 		const bars: GanttBarModel[] = []
 		const rows: string[] = []
@@ -219,18 +497,47 @@ watch(
 		const filteredTasks = Array.from(tasks.value.values()).filter(task => {
 			const hasAnyDate = Boolean(task.startDate || task.endDate || task.dueDate)
 
+			// Hide done tasks unless checkbox is on
+			if (task.done && !filters.value.showDoneTasks) {
+				return false
+			}
+
 			if (!filters.value.showTasksWithoutDates && !hasAnyDate) {
 				return false
 			}
 
+			// Dateless tasks always visible when checkbox is on
+			if (!hasAnyDate && filters.value.showTasksWithoutDates) {
+				return true
+			}
+
+			// Incomplete tasks are always visible (clamped to left edge if out of range)
+			if (!task.done) {
+				return true
+			}
+
 			const bar = transformTaskToGanttBar(task)
 
-			// Task is visible if it overlaps with the current date range
+			// Done tasks only visible if they overlap the current date range
 			return bar.start <= dateToDate.value && bar.end >= dateFromDate.value
 		})
 		
 		filteredTasks.forEach((t, index) => {
 			const bar = transformTaskToGanttBar(t)
+
+			// Clamp out-of-range bars to the visible left edge
+			if (bar.end < dateFromDate.value) {
+				bar.meta.isOverdue = true
+				bar.meta.originalStart = new Date(bar.start)
+				bar.meta.originalEnd = new Date(bar.end)
+				bar.start = dateFromDate.value
+				const oneDay = new Date(dateFromDate.value)
+				oneDay.setDate(oneDay.getDate() + 1)
+				bar.end = oneDay
+			} else if (bar.start < dateFromDate.value) {
+				bar.start = dateFromDate.value
+			}
+
 			bars.push(bar)
 			
 			const rowId = `row-${index}`
@@ -250,6 +557,88 @@ watch(
 		
 	},
 	{deep: true, immediate: true},
+)
+
+// Cascade preview: pulse affected bars and show ghost bars at shifted positions
+const activePreviewIds = ref<Set<string>>(new Set())
+
+watch(
+	() => props.cascadePreviews,
+	(previews) => {
+		const container = ganttContainer.value as HTMLElement | null
+		if (!container) return
+
+		const currentIds = new Set((previews || []).map(p => p.id))
+
+		// Remove ghosts and pulses for previews that are no longer active
+		for (const oldId of activePreviewIds.value) {
+			if (!currentIds.has(oldId)) {
+				container.querySelectorAll(`[data-preview-id="${oldId}"]`).forEach(el => el.remove())
+				container.querySelectorAll(`[data-pulse-id="${oldId}"]`).forEach(el => {
+					el.classList.remove('cascade-pulse')
+					el.removeAttribute('data-pulse-id')
+					el.style.removeProperty('--cascade-glow')
+				})
+			}
+		}
+
+		// Add ghosts for new previews
+		const idsToAdd = new Set<string>()
+		for (const preview of (previews || [])) {
+			if (!activePreviewIds.value.has(preview.id)) {
+				idsToAdd.add(preview.id)
+			}
+		}
+
+		// Update tracking immediately for removal, defer addition until rendered
+		activePreviewIds.value = currentIds
+
+		if (idsToAdd.size > 0) {
+			requestAnimationFrame(() => {
+				for (const preview of (previews || [])) {
+					if (!idsToAdd.has(preview.id)) continue
+
+					const {id, taskIds, deltaDays, accentColor} = preview
+					const deltaPixels = deltaDays * DAY_WIDTH_PIXELS.value
+					const strokeColor = accentColor || '#ffffff'
+
+					for (const taskId of taskIds) {
+						const barRect = container.querySelector(`[data-task-id="${taskId}"]`) as SVGRectElement | null
+						if (!barRect) continue
+
+						// Pulse the original bar
+						barRect.classList.add('cascade-pulse')
+						barRect.setAttribute('data-pulse-id', id)
+						if (accentColor) {
+							barRect.style.setProperty('--cascade-glow', accentColor)
+						}
+
+						// Create ghost rect
+						const svg = barRect.closest('svg')
+						if (!svg) continue
+
+						const ghost = barRect.cloneNode(true) as SVGRectElement
+						ghost.classList.add('cascade-ghost')
+						ghost.classList.remove('cascade-pulse')
+						ghost.removeAttribute('data-task-id')
+						ghost.removeAttribute('data-pulse-id')
+						ghost.setAttribute('data-preview-id', id)
+						ghost.style.pointerEvents = 'none'
+
+						const currentX = parseFloat(ghost.getAttribute('x') || '0')
+						ghost.setAttribute('x', String(currentX + deltaPixels))
+						ghost.setAttribute('opacity', '0.3')
+						ghost.setAttribute('stroke', strokeColor)
+						ghost.setAttribute('stroke-width', '2')
+						ghost.setAttribute('stroke-dasharray', '4,3')
+
+						svg.appendChild(ghost)
+					}
+				}
+			})
+		}
+	},
+	{deep: true},
 )
 
 function updateGanttTask(id: string, newStart: Date, newEnd: Date) {
@@ -306,9 +695,20 @@ let dragStarted = false
 
 const DOUBLE_CLICK_THRESHOLD_MS = 500
 const DRAG_THRESHOLD_PIXELS = 5
+const TOUCH_DRAG_THRESHOLD_PIXELS = 20
+const TOUCH_HOLD_MS = 300
+
+function isTouchEvent(e: PointerEvent): boolean {
+	return e.pointerType === 'touch'
+}
 
 function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
-	event.preventDefault()
+	const isTouch = isTouchEvent(event)
+
+	// Only preventDefault immediately for mouse — touch uses separate handler
+	if (!isTouch) {
+		event.preventDefault()
+	}
 	
 	const barIndex = ganttBars.value.findIndex(barGroup => barGroup.some(b => b.id === bar.id))
 	if (barIndex !== -1 && ganttRows.value[barIndex]) {
@@ -329,28 +729,96 @@ function handleBarPointerDown(bar: GanttBarModel, event: PointerEvent) {
 	
 	const startX = event.clientX
 	const startY = event.clientY
-	
-	const handleMove = (e: PointerEvent) => {
-		const diffX = Math.abs(e.clientX - startX)
-		const diffY = Math.abs(e.clientY - startY)
+	const threshold = isTouch ? TOUCH_DRAG_THRESHOLD_PIXELS : DRAG_THRESHOLD_PIXELS
+
+	if (isTouch) {
+		// Touch drag: use native Touch events for reliable scroll prevention.
+		// PointerEvents get cancelled by the browser once scrolling starts,
+		// but TouchEvents with preventDefault() in a non-passive handler block scroll.
+		let holdConfirmed = false
+		let cancelled = false
+		const targetEl = event.target as Element
+
+		const holdTimer = setTimeout(() => {
+			if (!cancelled) {
+				holdConfirmed = true
+				const barEl = targetEl.closest('g')
+				barEl?.classList.add('gantt-bar-held')
+			}
+		}, TOUCH_HOLD_MS)
+
+		const handleTouchMoveForDrag = (e: TouchEvent) => {
+			const touch = e.touches[0]
+			if (!touch) return
+
+			const diffX = Math.abs(touch.clientX - startX)
+			const diffY = Math.abs(touch.clientY - startY)
+
+			if (!holdConfirmed) {
+				if (diffX > threshold || diffY > threshold) {
+					cancelled = true
+					clearTimeout(holdTimer)
+					cleanupTouch()
+				}
+				return
+			}
+
+			// Hold confirmed — block scrolling
+			e.preventDefault()
+
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {
+				dragStarted = true
+				cleanupTouch()
+				// Create a synthetic PointerEvent-like object for startDrag
+				startDrag(bar, {
+					clientX: touch.clientX,
+					clientY: touch.clientY,
+					preventDefault: () => {},
+					target: targetEl,
+				} as unknown as PointerEvent)
+			}
+		}
+
+		const handleTouchEndForDrag = () => {
+			cancelled = true
+			clearTimeout(holdTimer)
+			cleanupTouch()
+			const barEl = targetEl.closest('g')
+			barEl?.classList.remove('gantt-bar-held')
+		}
+
+		const cleanupTouch = () => {
+			document.removeEventListener('touchmove', handleTouchMoveForDrag)
+			document.removeEventListener('touchend', handleTouchEndForDrag)
+			document.removeEventListener('touchcancel', handleTouchEndForDrag)
+		}
+
+		// CRITICAL: {passive: false} allows preventDefault in touchmove
+		document.addEventListener('touchmove', handleTouchMoveForDrag, {passive: false})
+		document.addEventListener('touchend', handleTouchEndForDrag)
+		document.addEventListener('touchcancel', handleTouchEndForDrag)
+	} else {
+		// Mouse: immediate drag on threshold
+		const handleMove = (e: PointerEvent) => {
+			const diffX = Math.abs(e.clientX - startX)
+			const diffY = Math.abs(e.clientY - startY)
+			
+			if (!dragStarted && (diffX > threshold || diffY > threshold)) {	
+				dragStarted = true
+				document.removeEventListener('pointermove', handleMove)
+				document.removeEventListener('pointerup', handleStop)
+				startDrag(bar, e)
+			}
+		}
 		
-		// Start drag if mouse moved more than threshhold
-		if (!dragStarted && (diffX > DRAG_THRESHOLD_PIXELS || diffY > DRAG_THRESHOLD_PIXELS)) {	
-			dragStarted = true
+		const handleStop = () => {
 			document.removeEventListener('pointermove', handleMove)
 			document.removeEventListener('pointerup', handleStop)
-			startDrag(bar, event)
 		}
+		
+		document.addEventListener('pointermove', handleMove)
+		document.addEventListener('pointerup', handleStop)
 	}
-	
-	const handleStop = () => {
-		document.removeEventListener('pointermove', handleMove)
-		document.removeEventListener('pointerup', handleStop)
-		// If no drag was started, this was just a click (do nothing)
-	}
-	
-	document.addEventListener('pointermove', handleMove)
-	document.addEventListener('pointerup', handleStop)
 }
 
 function setCursor(cursor: string, barElement?: Element | null) {
@@ -369,8 +837,14 @@ function clearCursor(barElement?: Element | null) {
 
 function startDrag(bar: GanttBarModel, event: PointerEvent) {
 	event.preventDefault()
+
+	if (bar.meta?.isOverdue) {
+		openTask(bar)
+		return
+	}
 	
 	isDragging.value = true
+	startDragTooltipTracking()
 	dragState.value = {
 		barId: bar.id,
 		startX: event.clientX,
@@ -379,55 +853,91 @@ function startDrag(bar: GanttBarModel, event: PointerEvent) {
 		currentDays: 0,
 	}
 	
-	const barGroup = (event.target as Element).closest('g')
+	const barGroup = (event.target as Element)?.closest('g')
 	const barElement = barGroup?.querySelector('.gantt-bar')
 	setCursor('grabbing', barElement)
+	barGroup?.classList.remove('gantt-bar-held')
 	
-	const handleMove = (e: PointerEvent) => {
+	const isTouch = event.pointerType === 'touch' || !(event instanceof PointerEvent)
+
+	const updateDragDays = (clientX: number) => {
 		if (!dragState.value || !isDragging.value) return
-		
-		const diff = e.clientX - dragState.value.startX
-		const days = Math.round(diff / DAY_WIDTH_PIXELS)
-		
+		const diff = clientX - dragState.value.startX
+		const days = Math.round(diff / DAY_WIDTH_PIXELS.value)
 		if (days !== dragState.value.currentDays) {
 			dragState.value.currentDays = days
 		}
 	}
+
+	// Pointer handlers (mouse)
+	const handlePointerMove = (e: PointerEvent) => {
+		e.preventDefault()
+		updateDragDays(e.clientX)
+	}
 	
+	// Touch handlers (mobile)
+	const handleTouchMove = (e: TouchEvent) => {
+		e.preventDefault()
+		if (e.touches[0]) updateDragDays(e.touches[0].clientX)
+	}
+
 	const handleStop = () => {
-		if (dragMoveHandler) {
-			document.removeEventListener('pointermove', dragMoveHandler)
-			dragMoveHandler = null
-		}
-		if (dragStopHandler) {
-			document.removeEventListener('pointerup', dragStopHandler)
-			dragStopHandler = null
-		}
+		// Remove all listeners
+		document.removeEventListener('pointermove', handlePointerMove)
+		document.removeEventListener('pointerup', handleStop)
+		document.removeEventListener('pointercancel', handleStop)
+		document.removeEventListener('touchmove', handleTouchMove)
+		document.removeEventListener('touchend', handleStop)
+		document.removeEventListener('touchcancel', handleStop)
+		dragMoveHandler = null
+		dragStopHandler = null
+		stopDragTooltipTracking()
 		
 		clearCursor(barElement)
 		
 		if (dragState.value && dragState.value.currentDays !== 0) {
-			const newStart = new Date(dragState.value.originalStart)
-			newStart.setDate(newStart.getDate() + dragState.value.currentDays)
-			const newEnd = new Date(dragState.value.originalEnd)
-			newEnd.setDate(newEnd.getDate() + dragState.value.currentDays)
-			
-			updateGanttTask(bar.id, newStart, newEnd)
+			const days = dragState.value.currentDays
+			const absDays = Math.abs(days)
+			const direction = days > 0 ? 'forward' : 'back'
+			const taskName = bar.meta?.label || `Task ${bar.id}`
+
+			dragConfirm.value = {
+				barId: bar.id,
+				taskName,
+				absDays,
+				direction,
+				originalStart: new Date(dragState.value.originalStart),
+				originalEnd: new Date(dragState.value.originalEnd),
+				currentDays: dragState.value.currentDays,
+				phase: 'move',
+			}
+
+			// Keep isDragging true so bar stays at preview position
+		} else {
+			isDragging.value = false
+			dragState.value = null
 		}
-		
-		isDragging.value = false
-		dragState.value = null
 	}
 	
 	// Store handlers for cleanup
-	dragMoveHandler = handleMove
+	dragMoveHandler = handlePointerMove
 	dragStopHandler = handleStop
 	
-	document.addEventListener('pointermove', handleMove)
-	document.addEventListener('pointerup', handleStop)
+	if (isTouch) {
+		document.addEventListener('touchmove', handleTouchMove, {passive: false})
+		document.addEventListener('touchend', handleStop)
+		document.addEventListener('touchcancel', handleStop)
+	} else {
+		document.addEventListener('pointermove', handlePointerMove)
+		document.addEventListener('pointerup', handleStop)
+		document.addEventListener('pointercancel', handleStop)
+	}
 }
 
 function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEvent) {
+	// Disable resize on touch — handles are hidden but just in case
+	if (isTouchEvent(event)) return
+
 	event.preventDefault()
 	event.stopPropagation() // Prevent drag from triggering
 	
@@ -449,7 +959,7 @@ function startResize(bar: GanttBarModel, edge: 'start' | 'end', event: PointerEv
 		if (!dragState.value || !isResizing.value) return
 		
 		const diff = e.clientX - dragState.value.startX
-		const days = Math.round(diff / DAY_WIDTH_PIXELS)
+		const days = Math.round(diff / DAY_WIDTH_PIXELS.value)
 		
 		if (edge === 'start') {
 			const newStart = new Date(dragState.value.originalStart)
@@ -532,7 +1042,33 @@ function focusTaskBar(rowId: string) {
 	}, 0)
 }
 
+// Suppress native context menu on touch devices (conflicts with long-press-to-drag)
+let lastPointerType = ''
+function trackPointerType(e: PointerEvent) {
+	lastPointerType = e.pointerType
+}
+function suppressTouchContextMenu(e: MouseEvent) {
+	if (lastPointerType === 'touch') {
+		e.preventDefault()
+	}
+}
+
+const container = ganttContainer as unknown as {value: HTMLElement | null}
+watch(ganttContainer, (el) => {
+	if (el) {
+		(el as HTMLElement).addEventListener('pointerdown', trackPointerType, {passive: true})
+		;(el as HTMLElement).addEventListener('contextmenu', suppressTouchContextMenu)
+	}
+}, {immediate: true})
+
 onUnmounted(() => {
+	if (container.value) {
+		container.value.removeEventListener('pointerdown', trackPointerType)
+		container.value.removeEventListener('contextmenu', suppressTouchContextMenu)
+		container.value.removeEventListener('touchstart', handleTouchStart as EventListener)
+		container.value.removeEventListener('touchmove', handleTouchMove as EventListener)
+		container.value.removeEventListener('wheel', handleWheel as EventListener)
+	}
 	if (dragMoveHandler) {
 		document.removeEventListener('pointermove', dragMoveHandler)
 		dragMoveHandler = null
@@ -542,12 +1078,70 @@ onUnmounted(() => {
 		dragStopHandler = null
 	}
 	document.body.style.removeProperty('cursor')
+	stopDragTooltipTracking()
 })
+
+// Pinch-to-zoom on touch devices
+let pinchStartDistance = 0
+let pinchStartWidth = DEFAULT_DAY_WIDTH
+
+function getTouchDistance(e: TouchEvent): number {
+	const t1 = e.touches[0]
+	const t2 = e.touches[1]
+	return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+}
+
+function handleTouchStart(e: TouchEvent) {
+	if (e.touches.length === 2) {
+		e.preventDefault()
+		pinchStartDistance = getTouchDistance(e)
+		pinchStartWidth = dayWidthPixels.value
+	}
+}
+
+function handleTouchMove(e: TouchEvent) {
+	if (e.touches.length === 2) {
+		e.preventDefault()
+		const currentDistance = getTouchDistance(e)
+		const scale = currentDistance / pinchStartDistance
+		const newWidth = Math.round(pinchStartWidth * scale)
+		dayWidthPixels.value = Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, newWidth))
+	}
+}
+
+// Trackpad pinch-to-zoom (browsers fire wheel + ctrlKey for pinch gestures)
+function handleWheel(e: WheelEvent) {
+	if (!e.ctrlKey) return
+	e.preventDefault()
+	const zoomSpeed = 0.5
+	const delta = -e.deltaY * zoomSpeed
+	const newWidth = Math.round(dayWidthPixels.value + delta)
+	dayWidthPixels.value = Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, newWidth))
+}
+
+watch(ganttContainer, (el) => {
+	if (el) {
+		(el as HTMLElement).addEventListener('touchstart', handleTouchStart, {passive: false})
+		;(el as HTMLElement).addEventListener('touchmove', handleTouchMove, {passive: false})
+		;(el as HTMLElement).addEventListener('wheel', handleWheel, {passive: false})
+	}
+}, {immediate: true})
 </script>
 
 <style scoped lang="scss">
 .gantt-container {
 	overflow-x: auto;
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	touch-action: pan-x pan-y pinch-zoom;
+}
+
+// Visual feedback when touch-hold is confirmed
+:deep(.gantt-bar-held .gantt-bar) {
+	filter: brightness(1.2);
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
 }
 
 .gantt-chart-wrapper {
@@ -565,5 +1159,182 @@ onUnmounted(() => {
 	position: relative;
 	min-block-size: 40px;
 	inline-size: 100%;
+}
+
+:deep(.cascade-pulse) {
+	--cascade-glow: rgba(240, 173, 78, 0.6);
+	animation: bar-cascade-pulse 1s ease-in-out infinite;
+}
+
+@keyframes bar-cascade-pulse {
+	0%, 100% {
+		filter: brightness(1) drop-shadow(0 0 0 transparent);
+	}
+	50% {
+		filter: brightness(1.3) drop-shadow(0 0 8px var(--cascade-glow, rgba(240, 173, 78, 0.6)));
+	}
+}
+
+:deep(.cascade-ghost) {
+	animation: ghost-float 1.5s ease-in-out infinite;
+}
+
+@keyframes ghost-float {
+	0%, 100% {
+		opacity: 0.2;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+// Drag confirm bubble
+.drag-date-tooltip {
+	position: fixed;
+	transform: translateX(-50%);
+	padding: 2px 8px;
+	font-size: .65rem;
+	font-weight: 500;
+	color: var(--grey-200, #ddd);
+	background: var(--grey-800, #333);
+	border: 1px solid var(--grey-600, #555);
+	border-radius: 4px;
+	white-space: nowrap;
+	pointer-events: none;
+	z-index: 85;
+	opacity: 0.9;
+	letter-spacing: 0.02em;
+}
+
+.drag-confirm-scrim {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.15);
+	z-index: 90;
+	cursor: pointer;
+}
+
+.drag-confirm-bubble {
+	position: fixed;
+	z-index: 100;
+	transform: translate(-50%, -100%);
+	background: var(--grey-900, #1a1a2e);
+	border: 1px solid var(--grey-700, #444);
+	border-radius: 10px;
+	padding: 4px 8px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+	white-space: nowrap;
+	pointer-events: auto;
+
+	&.cascade-phase {
+		border-color: var(--cascade-accent, #7e7);
+	}
+
+	&::after {
+		content: '';
+		position: absolute;
+		bottom: -6px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 0;
+		height: 0;
+		border-left: 6px solid transparent;
+		border-right: 6px solid transparent;
+		border-top: 6px solid var(--grey-900, #1a1a2e);
+	}
+}
+
+.drag-confirm-cascade-icon {
+	font-size: 0.85rem;
+	font-weight: bold;
+	line-height: 1;
+}
+
+.drag-confirm-label {
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--grey-100, #eee);
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.drag-confirm-detail {
+	font-size: 0.7rem;
+	color: var(--grey-400, #aaa);
+}
+
+.drag-confirm-step {
+	font-size: 0.65rem;
+	color: var(--grey-300, #bbb);
+	background: rgba(255, 255, 255, 0.08);
+	padding: 1px 5px;
+	border-radius: 8px;
+}
+
+.drag-confirm-btn {
+	min-width: 26px;
+	height: 26px;
+	border-radius: 13px;
+	border: none;
+	cursor: pointer;
+	font-size: 0.7rem;
+	font-weight: bold;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 8px;
+	white-space: nowrap;
+	transition: transform 0.1s;
+
+	&:active {
+		transform: scale(0.9);
+	}
+}
+
+.drag-confirm-btn.confirm {
+	background: #4caf50;
+	color: white;
+}
+
+.drag-confirm-btn.skip {
+	background: #ff9800;
+	color: white;
+}
+
+.drag-confirm-btn.cancel {
+	background: #666;
+	color: white;
+}
+
+.drag-confirm-btn.confirm:hover {
+	background: #66bb6a;
+}
+
+.drag-confirm-btn.skip:hover {
+	background: #ffa726;
+}
+
+.drag-confirm-btn.cancel:hover {
+	background: #888;
+}
+
+// Bubble transition
+.bubble-enter-active {
+	transition: opacity 0.15s, transform 0.15s;
+}
+.bubble-leave-active {
+	transition: opacity 0.1s, transform 0.1s;
+}
+.bubble-enter-from {
+	opacity: 0;
+	transform: translate(-50%, -90%) scale(0.8);
+}
+.bubble-leave-to {
+	opacity: 0;
+	transform: translate(-50%, -100%) scale(0.9);
 }
 </style>

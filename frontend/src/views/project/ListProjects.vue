@@ -1,21 +1,22 @@
 <template>
 	<div
 		v-cy="'projects-list'"
-		class="content loader-container"
+		class="content-widescreen loader-container"
 		:class="{'is-loading': loading}"
 	>
-		<header class="project-header">
-			<FancyCheckbox
-				v-model="showArchived"
-				v-cy="'show-archived-check'"
-			>
-				{{ $t('project.showArchived') }}
-			</FancyCheckbox>
+		<h2>{{ $t('project.projects') }}</h2>
+		<p class="has-text-grey">
+			{{ $t('project.pageDescription') }}
+		</p>
 
+		<hr class="page-separator">
+
+		<header class="project-header">
 			<div class="action-buttons">
 				<XButton
 					:to="{name: 'filters.create'}"
 					icon="filter"
+					:shadow="false"
 				>
 					{{ $t('filters.create.title') }}
 				</XButton>
@@ -23,10 +24,17 @@
 					v-cy="'new-project'"
 					:to="{name: 'project.create'}"
 					icon="plus"
+					:shadow="false"
 				>
 					{{ $t('project.create.header') }}
 				</XButton>
 			</div>
+			<FancyCheckbox
+				v-model="showArchived"
+				v-cy="'show-archived-check'"
+			>
+				{{ $t('project.showArchived') }}
+			</FancyCheckbox>
 		</header>
 
 		<ProjectCardGrid
@@ -63,12 +71,24 @@ const projects = computed(() => {
 </script>
 
 <style lang="scss" scoped>
+.content-widescreen {
+	max-inline-size: 900px;
+	margin: 0 auto;
+	padding: 1.5rem 1rem;
+}
+
+.page-separator {
+	border: none;
+	border-block-start: 2px solid var(--grey-200);
+	margin-block: 1rem 1.5rem;
+}
+
 .project-header {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	gap: 1rem;
-	margin-block-end: 1rem;
+	margin-block-end: 1.5rem;
 
 	@media screen and (max-width: $tablet) {
 		flex-direction: column;
