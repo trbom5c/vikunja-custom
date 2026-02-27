@@ -1,33 +1,39 @@
 <template>
 	<div
 		:class="{ 'is-loading': loading}"
-		class="loader-container"
+		class="content-widescreen loader-container"
 	>
-		<XButton
-			:to="{name:'labels.create'}"
-			class="is-pulled-right"
-			icon="plus"
-		>
-			{{ $t('label.create.header') }}
-		</XButton>
+		<h2>{{ $t('label.manage') }}</h2>
+		<p class="has-text-grey">
+			{{ $t('label.description') }}
+		</p>
 
-		<div class="content">
-			<h1>{{ $t('label.manage') }}</h1>
-			<p v-if="labelStore.labelsArray.length > 0">
-				{{ $t('label.description') }}
-			</p>
-			<p
-				v-else
-				class="has-text-centered has-text-grey is-italic"
+		<hr class="page-separator">
+
+		<div class="tab-actions">
+			<XButton
+				:to="{name:'labels.create'}"
+				icon="plus"
+				:shadow="false"
 			>
-				{{ $t('label.newCTA') }}
-				<RouterLink :to="{name:'labels.create'}">
-					{{ $t('label.create.title') }}.
-				</RouterLink>
-			</p>
+				{{ $t('label.create.header') }}
+			</XButton>
 		</div>
 
-		<div class="columns">
+		<p
+			v-if="labelStore.labelsArray.length === 0 && !loading"
+			class="has-text-centered has-text-grey p-4"
+		>
+			{{ $t('label.newCTA') }}
+			<RouterLink :to="{name:'labels.create'}">
+				{{ $t('label.create.title') }}.
+			</RouterLink>
+		</p>
+
+		<div
+			v-else
+			class="columns"
+		>
 			<div class="labels-list column">
 				<RouterLink
 					v-for="label in labelStore.labelsArray"
@@ -171,21 +177,13 @@ function editLabel(label: ILabel) {
 	if (label.createdBy.id !== userInfo.value.id) {
 		return
 	}
-	// Duplicating the label to make sure it does not look like changes take effect immediatly as the label 
-	// object passed to this function here still has a reference to the store.
 	labelEditLabel.value = new LabelModel({
 		...label,
-		// The model does not support passing dates into it directly so we need to convert them first				
 		created: +label.created,
 		updated: +label.updated,
 	})
 	isLabelEdit.value = true
 
-	// This makes the editor trigger its mounted function again which makes it forget every input
-	// it currently has in its textarea. This is a counter-hack to a hack inside of vue-easymde
-	// which made it impossible to detect change from the outside. Therefore the component would
-	// not update if new content from the outside was made available.
-	// See https://github.com/NikulinIlya/vue-easymde/issues/3
 	editorActive.value = false
 	nextTick(() => editorActive.value = true)
 }
@@ -197,14 +195,30 @@ function showDeleteDialoge(label: ILabel) {
 </script>
 
 <style lang="scss" scoped>
+.content-widescreen {
+	max-inline-size: 900px;
+	margin: 0 auto;
+	padding: 1.5rem 1rem;
+}
+
+.page-separator {
+	border: none;
+	border-block-start: 2px solid var(--grey-200);
+	margin-block: 1rem 1.5rem;
+}
+
+.tab-actions {
+	margin-block-end: 1.5rem;
+}
+
 .label-edit-button {
 	border-radius: 100%;
 	background-color: rgba(0,0,0,0.2);
 	inline-size: 1rem;
 	block-size: 1rem;
 	display: flex;
-  	align-items: center;
-  	justify-content: center;
+	align-items: center;
+	justify-content: center;
 	color: #ffffff; // always white
 	margin-inline-start: .25rem;
 
