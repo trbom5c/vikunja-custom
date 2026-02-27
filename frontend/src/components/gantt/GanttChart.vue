@@ -582,6 +582,29 @@ watch(
 			}
 		}
 
+		// Reconcile individual ghosts within still-active previews
+		// (handles skip/confirm removing single tasks from a preview's taskIds)
+		for (const preview of (previews || [])) {
+			if (!activePreviewIds.value.has(preview.id)) continue // new preview, handled below
+			const {id, taskIds} = preview
+			// Find all ghost elements for this preview and remove ones no longer in taskIds
+			container.querySelectorAll(`[data-preview-id="${id}"]`).forEach(el => {
+				const ghostTaskId = el.getAttribute('data-ghost-task-id')
+				if (ghostTaskId && !taskIds.has(Number(ghostTaskId))) {
+					el.remove()
+				}
+			})
+			// Also remove pulses from bars that are no longer in taskIds
+			container.querySelectorAll(`[data-pulse-id="${id}"]`).forEach(el => {
+				const taskId = el.getAttribute('data-task-id')
+				if (taskId && !taskIds.has(Number(taskId))) {
+					el.classList.remove('cascade-pulse')
+					el.removeAttribute('data-pulse-id')
+					el.style.removeProperty('--cascade-glow')
+				}
+			})
+		}
+
 		// Add ghosts for new previews
 		const idsToAdd = new Set<string>()
 		for (const preview of (previews || [])) {
@@ -623,6 +646,7 @@ watch(
 						ghost.removeAttribute('data-task-id')
 						ghost.removeAttribute('data-pulse-id')
 						ghost.setAttribute('data-preview-id', id)
+						ghost.setAttribute('data-ghost-task-id', String(taskId))
 						ghost.style.pointerEvents = 'none'
 
 						const currentX = parseFloat(ghost.getAttribute('x') || '0')
