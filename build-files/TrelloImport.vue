@@ -537,14 +537,19 @@ async function startImport() {
 					taskData.dueDate = new Date(card.due)
 				}
 
-				// Start date
-				if (card.start) {
+				// Start date + End date for gantt bar positioning
+				if (card.start && card.due) {
+					// Has both start and due → full range bar
 					taskData.startDate = new Date(card.start)
-					// If we have start + due, also set endDate = due for gantt
-					if (card.due) {
-						taskData.startDate = new Date(card.start)
-						taskData.endDate = new Date(card.due)
-					}
+					taskData.endDate = new Date(card.due)
+				} else if (card.start && !card.due) {
+					// Start only → single-day bar at start
+					taskData.startDate = new Date(card.start)
+					taskData.endDate = new Date(card.start)
+				} else if (!card.start && card.due) {
+					// Due only → single-day bar at due date
+					taskData.startDate = new Date(card.due)
+					taskData.endDate = new Date(card.due)
 				}
 
 				// Mark done
