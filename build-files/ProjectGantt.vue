@@ -6,54 +6,52 @@
 		:view-id
 	>
 		<template #default>
-			<Card :has-content="false">
-				<div class="gantt-options">
-					<div class="gantt-options-row">
-						<FormField :label="$t('project.gantt.range')">
-							<Foo
-								id="range"
-								ref="flatPickerEl"
-								v-model="flatPickerDateRange"
-								:config="flatPickerConfig"
-								class="input"
-								:placeholder="$t('project.gantt.range')"
-							/>
-						</FormField>
-						<FancyCheckbox
-							v-model="filters.showTasksWithoutDates"
-							is-block
-						>
-							{{ $t('task.show.noDates') }}
-						</FancyCheckbox>
-						<FancyCheckbox
-							v-model="filters.showDoneTasks"
-							is-block
-						>
-							{{ $t('task.show.completed') }}
-						</FancyCheckbox>
-					</div>
-					<div class="gantt-options-row">
-						<SubprojectFilter
-							:project-id="filters.projectId"
-							:show-legend="true"
-							@update:includeSubprojects="onSubprojectToggle"
-							@update:excludeProjectIds="onExcludeChange"
-							@update:colorMap="onColorMapChange"
-						/>
-						<GanttArrowSettings />
-						<XButton
-							v-if="canUndo"
-							variant="tertiary"
-							icon="undo"
-							class="gantt-undo-btn"
-							@click="undoLastAction"
-						>
-							Undo
-						</XButton>
-						<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
-					</div>
+			<div class="gantt-toolbar">
+				<div class="gantt-toolbar-left">
+					<Foo
+						id="range"
+						ref="flatPickerEl"
+						v-model="flatPickerDateRange"
+						:config="flatPickerConfig"
+						class="gantt-date-input"
+						:placeholder="$t('project.gantt.range')"
+					/>
+					<FancyCheckbox
+						v-model="filters.showTasksWithoutDates"
+						is-block
+						class="gantt-checkbox"
+					>
+						{{ $t('task.show.noDates') }}
+					</FancyCheckbox>
+					<FancyCheckbox
+						v-model="filters.showDoneTasks"
+						is-block
+						class="gantt-checkbox"
+					>
+						{{ $t('task.show.completed') }}
+					</FancyCheckbox>
 				</div>
-			</Card>
+				<div class="gantt-toolbar-right">
+					<SubprojectFilter
+						:project-id="filters.projectId"
+						:show-legend="true"
+						@update:includeSubprojects="onSubprojectToggle"
+						@update:excludeProjectIds="onExcludeChange"
+						@update:colorMap="onColorMapChange"
+					/>
+					<GanttArrowSettings />
+					<XButton
+						v-if="canUndo"
+						variant="tertiary"
+						icon="undo"
+						class="gantt-undo-btn"
+						@click="undoLastAction"
+					>
+						Undo
+					</XButton>
+					<span class="gantt-zoom-hint">Ctrl + scroll to zoom</span>
+				</div>
+			</div>
 
 			<div class="gantt-chart-container">
 				<Card
@@ -128,7 +126,6 @@ import Foo from '@/components/misc/flatpickr/Flatpickr.vue'
 import ProjectWrapper from '@/components/project/ProjectWrapper.vue'
 import FancyCheckbox from '@/components/input/FancyCheckbox.vue'
 import TaskForm from '@/components/tasks/TaskForm.vue'
-import FormField from '@/components/input/FormField.vue'
 
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
@@ -271,6 +268,78 @@ const flatPickerConfig = computed(() => ({
 </script>
 
 <style lang="scss" scoped>
+.gantt-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: .35rem .75rem;
+	padding: .4rem .75rem;
+	margin-block-end: .25rem;
+	font-size: .8rem;
+
+	@media screen and (max-width: $tablet) {
+		flex-direction: column;
+		align-items: stretch;
+		gap: .5rem;
+	}
+}
+
+.gantt-toolbar-left,
+.gantt-toolbar-right {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: .35rem .6rem;
+}
+
+.gantt-toolbar-right {
+	margin-inline-start: auto;
+
+	@media screen and (max-width: $tablet) {
+		margin-inline-start: 0;
+	}
+}
+
+.gantt-date-input {
+	font-size: .75rem;
+	padding: .25rem .5rem;
+	border-radius: 4px;
+	border: 1px solid var(--grey-700, #555);
+	background: var(--grey-800, #222);
+	color: var(--grey-100, #eee);
+	min-inline-size: 170px;
+	max-inline-size: 220px;
+	cursor: pointer;
+
+	&:focus {
+		border-color: var(--primary);
+		outline: none;
+	}
+}
+
+// Override flatpickr altInput styling
+:deep(.gantt-date-input + .flatpickr-input) {
+	font-size: .75rem !important;
+	padding: .25rem .5rem !important;
+	border-radius: 4px !important;
+	border: 1px solid var(--grey-700, #555) !important;
+	background: var(--grey-800, #222) !important;
+	color: var(--grey-100, #eee) !important;
+	block-size: auto !important;
+	min-inline-size: 170px;
+	max-inline-size: 220px;
+}
+
+.gantt-checkbox {
+	font-size: .75rem;
+	white-space: nowrap;
+
+	:deep(.fancycheckbox__label) {
+		font-size: .75rem;
+	}
+}
+
 .gantt-chart-container {
 	padding-block-end: 1rem;
 }
@@ -300,74 +369,21 @@ const flatPickerConfig = computed(() => ({
 	padding-inline: .75rem;
 }
 
-.gantt-options {
-	display: flex;
-	flex-direction: column;
-	gap: .5rem;
-	padding: .5rem .75rem;
-	margin-block-end: 0;
-}
-
-.gantt-options-row {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: .5rem .75rem;
-
-	@media screen and (max-width: $tablet) {
-		flex-direction: column;
-		align-items: stretch;
-	}
-}
-
-:global(.link-share-view:not(.has-background)) .gantt-options {
-	border: none;
-	box-shadow: none;
-
-	.card-content {
-		padding: .5rem;
-	}
-}
-
-.field {
-	margin-block-end: 0;
-	flex: 0 1 auto;
-
-	&:not(:last-child) {
-		padding-inline-end: 0;
-	}
-
-	@media screen and (max-width: $tablet) {
-		inline-size: 100%;
-		max-inline-size: 100%;
-		margin-block-start: .25rem;
-	}
-
-	&, .input {
-		font-size: .8rem;
-	}
-
-	.select,
-	.select select {
-		block-size: auto;
-		inline-size: 100%;
-		font-size: .8rem;
-	}
-
-	.label {
-		font-size: .9rem;
-	}
-}
-
 .gantt-undo-btn {
 	white-space: nowrap;
+	font-size: .75rem;
 }
 
 .gantt-zoom-hint {
-	font-size: 0.65rem;
-	color: var(--grey-500, #888);
+	font-size: .6rem;
+	color: var(--grey-500, #777);
 	white-space: nowrap;
 	user-select: none;
-	margin-inline-start: auto;
+	opacity: 0.7;
+}
+
+// Kill any inherited .field styles leaking in
+:deep(.field) {
+	margin-block-end: 0;
 }
 </style>
