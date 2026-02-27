@@ -85,9 +85,8 @@
 				:aria-pressed="isRowFocused"
 				@pointerdown="handleBarPointerDown(bar, $event)"
 			>
-				<title v-if="bar.meta?.isOverdue">
-					{{ getOverdueTooltip(bar) }}
-				</title>
+				<title v-if="bar.meta?.isOverdue">{{ getOverdueTooltip(bar) }}</title>
+				<title v-else>{{ getBarTooltip(bar) }}</title>
 			</rect>
 
 			<!-- Overdue left-arrow indicator -->
@@ -400,6 +399,16 @@ function getOverdueTooltip(bar: GanttBarModel): string {
 	const origEnd = bar.meta?.originalEnd as Date | undefined
 	if (!origStart || !origEnd) return 'Overdue task'
 	return `Overdue: was ${origStart.toLocaleDateString()} – ${origEnd.toLocaleDateString()}`
+}
+
+function getBarTooltip(bar: GanttBarModel): string {
+	const label = bar.meta?.label || String(bar.id)
+	const startStr = bar.start.toLocaleDateString()
+	const endStr = bar.end.toLocaleDateString()
+	if (startStr === endStr) {
+		return `${label} — ${startStr}`
+	}
+	return `${label} — ${startStr} – ${endStr}`
 }
 </script>
 
