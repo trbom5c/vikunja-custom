@@ -23,9 +23,11 @@ export interface GanttFilters {
 	dateFrom: DateISO
 	dateTo: DateISO
 	showTasksWithoutDates: boolean
+	showDoneTasks: boolean
 }
 
 const DEFAULT_SHOW_TASKS_WITHOUT_DATES = false
+const DEFAULT_SHOW_DONE_TASKS = false
 
 const DEFAULT_DATEFROM_DAY_OFFSET = -15
 const DEFAULT_DATETO_DAY_OFFSET = +55
@@ -49,6 +51,7 @@ function ganttRouteToFilters(route: Partial<RouteLocationNormalized>): GanttFilt
 		dateFrom: parseDateProp(ganttRoute.query?.dateFrom as DateKebab) || getDefaultDateFrom(),
 		dateTo: parseDateProp(ganttRoute.query?.dateTo as DateKebab) || getDefaultDateTo(),
 		showTasksWithoutDates: parseBooleanProp(ganttRoute.query?.showTasksWithoutDates as string) || DEFAULT_SHOW_TASKS_WITHOUT_DATES,
+		showDoneTasks: parseBooleanProp(ganttRoute.query?.showDoneTasks as string) || DEFAULT_SHOW_DONE_TASKS,
 	}
 }
 
@@ -76,6 +79,10 @@ function ganttFiltersToRoute(filters: GanttFilters): RouteLocationRaw {
 		query.showTasksWithoutDates = String(filters.showTasksWithoutDates)
 	}
 
+	if (filters.showDoneTasks) {
+		query.showDoneTasks = String(filters.showDoneTasks)
+	}
+
 	return {
 		name: 'project.view',
 		params: {
@@ -90,15 +97,22 @@ function ganttFiltersToApiParams(filters: GanttFilters): TaskFilterParams {
 	const dateFrom = isoToKebabDate(filters.dateFrom)
 	const dateTo = isoToKebabDate(filters.dateTo)
 
+	// Date-range condition: tasks overlapping the visible window
+	const dateRangeFilter =
+		'(start_date >= "' + dateFrom + '" && start_date <= "' + dateTo + '") || ' +
+		'(end_date >= "' + dateFrom + '" && end_date <= "' + dateTo + '") || ' +
+		'(due_date >= "' + dateFrom + '" && due_date <= "' + dateTo + '")'
+
+	// Always show all incomplete tasks (catches overdue items outside the date range)
+	// When showDoneTasks is on, also include completed tasks that fall within the date range
+	const filter = filters.showDoneTasks
+		? '(done = false || (done = true && (' + dateRangeFilter + ')))'
+		: 'done = false'
+
 	return {
 		sort_by: ['start_date', 'done', 'id'],
 		order_by: ['asc', 'asc', 'desc'],
-		filter: '(' +
-			'(start_date >= "' + dateFrom + '" && start_date <= "' + dateTo + '") || ' +
-			'(end_date >= "' + dateFrom + '" && end_date <= "' + dateTo + '") || ' +
-			'(due_date >= "' + dateFrom + '" && due_date <= "' + dateTo + '") || ' +
-			'(start_date <= "' + dateFrom + '" && end_date >= "' + dateTo + '")' +
-			')',
+		filter,
 		filter_include_nulls: filters.showTasksWithoutDates,
 	}
 }
@@ -107,7 +121,7 @@ export type UseGanttFiltersReturn =
 	UseRouteFiltersReturn<GanttFilters> &
 	UseGanttTaskListReturn
 
-export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref<IProjectView['id']>): UseGanttFiltersReturn {
+export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref<IProjectView['id']>, extraParams?: Ref<Record<string, unknown>>): UseGanttFiltersReturn {
 	const viewFiltersStore = useViewFiltersStore()
 
 	const {
@@ -144,7 +158,12 @@ export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref
 		isLoading,
 		addTask,
 		updateTask,
-	} = useGanttTaskList<GanttFilters>(filters, ganttFiltersToApiParams, viewId)
+		canUndo,
+		undoLastAction,
+		cascadePreviews,
+		onCascadePrompt,
+		onCascadeClose,
+	} = useGanttTaskList<GanttFilters>(filters, ganttFiltersToApiParams, viewId, true, extraParams)
 
 	return {
 		filters,
@@ -157,5 +176,10 @@ export function useGanttFilters(route: Ref<RouteLocationNormalized>, viewId: Ref
 		isLoading,
 		addTask,
 		updateTask,
+		canUndo,
+		undoLastAction,
+		cascadePreviews,
+		onCascadePrompt,
+		onCascadeClose,
 	}
 }
