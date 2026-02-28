@@ -59,6 +59,7 @@ const DEFAULTS: GanttArrowConfig = {
 }
 
 function loadConfig(): GanttArrowConfig {
+	// Safe: only called from within useGanttArrowConfig() which runs inside component setup
 	const prefs = useUserPreferences()
 	const raw = prefs.get(STORAGE_KEY, '')
 	if (raw) {
@@ -74,48 +75,57 @@ function saveConfig(config: GanttArrowConfig) {
 	prefs.set(STORAGE_KEY, JSON.stringify(config))
 }
 
-// Singleton reactive config
-const arrowConfig = reactive<GanttArrowConfig>(loadConfig())
+// Lazy singleton — initialized on first use inside a component, not at module scope
+let arrowConfig: ReturnType<typeof reactive<GanttArrowConfig>> | null = null
+let initialized = false
 
-// Re-hydrate once preferences are loaded from API (loadConfig may have run before init)
-const {loaded: prefsLoaded} = useUserPreferences()
-watch(prefsLoaded, (isLoaded) => {
-	if (isLoaded) {
-		const fresh = loadConfig()
-		// Only apply if different from defaults (i.e. server had stored config)
-		const freshJson = JSON.stringify(fresh)
-		const currentJson = JSON.stringify(arrowConfig)
-		if (freshJson !== currentJson) {
-			Object.assign(arrowConfig, fresh)
+function ensureInitialized() {
+	if (initialized) return
+	initialized = true
+
+	arrowConfig = reactive<GanttArrowConfig>(loadConfig())
+
+	// Re-hydrate once preferences are loaded from API
+	const {loaded: prefsLoaded} = useUserPreferences()
+	watch(prefsLoaded, (isLoaded) => {
+		if (isLoaded && arrowConfig) {
+			const fresh = loadConfig()
+			const freshJson = JSON.stringify(fresh)
+			const currentJson = JSON.stringify(arrowConfig)
+			if (freshJson !== currentJson) {
+				Object.assign(arrowConfig, fresh)
+			}
 		}
-	}
-}, {immediate: true})
+	}, {immediate: true})
 
-// Auto-save on any change
-watch(arrowConfig, (val) => {
-	saveConfig(val)
-}, {deep: true})
+	// Auto-save on any change
+	watch(arrowConfig, (val) => {
+		saveConfig(val)
+	}, {deep: true})
+}
 
 export function useGanttArrowConfig() {
+	ensureInitialized()
+
 	function resetToDefaults() {
-		Object.assign(arrowConfig, DEFAULTS)
+		Object.assign(arrowConfig!, DEFAULTS)
 	}
 
 	function importConfig(json: string) {
 		try {
 			const parsed = JSON.parse(json)
-			Object.assign(arrowConfig, {...DEFAULTS, ...parsed})
+			Object.assign(arrowConfig!, {...DEFAULTS, ...parsed})
 		} catch {
 			// ignore
 		}
 	}
 
 	function exportConfig(): string {
-		return JSON.stringify(arrowConfig, null, 2)
+		return JSON.stringify(arrowConfig!, null, 2)
 	}
 
 	return {
-		config: arrowConfig,
+		config: arrowConfig!,
 		defaults: DEFAULTS,
 		resetToDefaults,
 		importConfig,
