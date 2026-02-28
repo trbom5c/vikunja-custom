@@ -357,7 +357,6 @@ import {useBaseStore} from '@/stores/base'
 import {useTaskStore} from '@/stores/tasks'
 import {useKanbanStore} from '@/stores/kanban'
 import {useAuthStore} from '@/stores/auth'
-import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import ProjectWrapper from '@/components/project/ProjectWrapper.vue'
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
@@ -415,17 +414,34 @@ const kanbanStore = useKanbanStore()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
-const userPrefs = useUserPreferences()
 
 const alwaysShowBucketTaskCount = computed(() => authStore.settings.frontendSettings.alwaysShowBucketTaskCount)
 
-// Kanban date display mode — synced via user preferences
+// Kanban date display mode — persisted in localStorage, synced to user prefs API
 // 'relative' = Vikunja default ("4 days ago"), 'date' = absolute ("Feb 23, 2026")
-const kanbanDateMode = computed(() => userPrefs.get('kanban-date-mode', 'relative'))
+const kanbanDateMode = ref<string>(localStorage.getItem('kanban-date-mode') || 'relative')
 
 function setDateMode(mode: string) {
-	userPrefs.set('kanban-date-mode', mode)
+	kanbanDateMode.value = mode
+	localStorage.setItem('kanban-date-mode', mode)
+	// Async sync to user preferences API for cross-device persistence
+	import('@/composables/useUserPreferences').then(({useUserPreferences}) => {
+		const prefs = useUserPreferences()
+		prefs.set('kanban-date-mode', mode)
+	}).catch(() => {})
 }
+
+// On mount, hydrate from API prefs if available (API takes priority over localStorage)
+import('@/composables/useUserPreferences').then(({useUserPreferences}) => {
+	try {
+		const prefs = useUserPreferences()
+		const apiVal = prefs.get('kanban-date-mode', '')
+		if (apiVal && apiVal !== kanbanDateMode.value) {
+			kanbanDateMode.value = apiVal
+			localStorage.setItem('kanban-date-mode', apiVal)
+		}
+	} catch {}
+}).catch(() => {})
 const {handleTaskDropToProject} = useTaskDragToProject()
 const taskPositionService = ref(new TaskPositionService())
 const taskBucketService = ref(new TaskBucketService())

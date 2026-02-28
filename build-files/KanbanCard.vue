@@ -195,7 +195,7 @@ import type {IProject} from '@/modelTypes/IProject'
 import {SUPPORTED_IMAGE_SUFFIX} from '@/models/attachment'
 import AttachmentService, {PREVIEW_SIZE} from '@/services/attachment'
 
-import {formatDateLong, formatDisplayDate, formatDateSince, formatISO} from '@/helpers/time/formatDate'
+import {formatDateLong, formatDisplayDate, formatISO} from '@/helpers/time/formatDate'
 import {colorIsDark} from '@/helpers/color/colorIsDark'
 import {useTaskStore} from '@/stores/tasks'
 import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
@@ -251,18 +251,19 @@ const isOverdue = computed(() => (
 // ── Date display helpers ──
 // formatDisplayDate = relative ("4 days ago", "in a month") — Vikunja's default
 // formatDateLong    = absolute ("February 23, 2026")
-// formatDateSince   = relative from now ("4 days ago")
 //
 // dateMode prop:
-//   'date'     → show absolute on card, relative in tooltip
-//   'relative' → show relative on card (Vikunja default), absolute in tooltip
+//   'date'     → show short absolute on card, relative in tooltip
+//   'relative' → show relative on card (Vikunja default), full absolute in tooltip
 
 function absoluteDate(d: Date): string {
-	return formatDateLong(d)
+	// Short absolute format for card display: "Feb 25, 2026"
+	return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function relativeDate(d: Date): string {
-	return formatDateSince(d)
+	// formatDisplayDate already returns relative strings in Vikunja ("4 days ago", "in a month")
+	return formatDisplayDate(d)
 }
 
 const dateDisplay = computed(() => {
@@ -277,7 +278,7 @@ const dateTooltip = computed(() => {
 	// Tooltip is always the inverse
 	return props.dateMode === 'date'
 		? relativeDate(props.task.dueDate)
-		: absoluteDate(props.task.dueDate)
+		: formatDateLong(props.task.dueDate)
 })
 
 // ── Done-at display (same mode logic) ──
@@ -292,7 +293,7 @@ const doneAtTooltip = computed(() => {
 	if (!props.task.doneAt) return ''
 	return props.dateMode === 'date'
 		? relativeDate(props.task.doneAt)
-		: absoluteDate(props.task.doneAt)
+		: formatDateLong(props.task.doneAt)
 })
 
 async function toggleTaskDone(task: ITask) {
