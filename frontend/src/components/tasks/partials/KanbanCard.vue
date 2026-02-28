@@ -13,6 +13,7 @@
 		@click.exact="openTaskDetail()"
 		@click.ctrl="() => toggleTaskDone(task)"
 		@click.meta="() => toggleTaskDone(task)"
+		@contextmenu.prevent="openContextMenu"
 	>
 		<img
 			v-if="coverImageBlobUrl"
@@ -41,22 +42,55 @@
 						{{ task.position }}
 					</span>
 				</span>
-				<span
-					v-if="task.dueDate > 0"
-					v-tooltip="formatDateLong(task.dueDate)"
-					:class="{'overdue': isOverdue}"
-					class="due-date"
-				>
-					<span class="icon">
-						<Icon :icon="['far', 'calendar-alt']" />
+				<div class="tw-flex tw-items-center tw-gap-1">
+					<span
+						v-if="task.dueDate > 0"
+						v-tooltip="formatDateLong(task.dueDate)"
+						:class="{'overdue': isOverdue}"
+						class="due-date"
+					>
+						<span class="icon">
+							<Icon :icon="['far', 'calendar-alt']" />
+						</span>
+						<time :datetime="formatISO(task.dueDate)">
+							{{ formatDisplayDate(task.dueDate) }}
+						</time>
 					</span>
-					<time :datetime="formatISO(task.dueDate)">
-						{{ formatDisplayDate(task.dueDate) }}
-					</time>
-				</span>
+					<Dropdown
+						class="card-menu"
+						trigger-icon="ellipsis-v"
+					>
+						<DropdownItem
+							icon="copy"
+							@click.stop="$emit('duplicateTask', task)"
+						>
+							{{ $t('task.duplicate.action') }}
+						</DropdownItem>
+						<DropdownItem
+							icon="layer-group"
+							@click.stop="$emit('saveAsTemplate', task)"
+						>
+							{{ $t('task.template.saveAsTemplate') }}
+						</DropdownItem>
+						<DropdownItem
+							:icon="task.done ? 'box-open' : 'box-archive'"
+							@click.stop="archiveTask(task)"
+						>
+							{{ task.done ? $t('task.kanbanArchive.unarchive') : $t('task.kanbanArchive.archive') }}
+						</DropdownItem>
+					</Dropdown>
+				</div>
 			</div>
 			
-			<h3>{{ task.title }}</h3>
+			<h3>
+				<Icon
+					v-if="task.autoTemplateId > 0"
+					icon="bolt"
+					v-tooltip="$t('task.autoTask.autoGenIndicator')"
+					class="auto-gen-indicator"
+				/>
+				{{ task.title }}
+			</h3>
 			
 			<span
 				v-if="projectTitle"
@@ -125,6 +159,8 @@ import Done from '@/components/misc/Done.vue'
 import Labels from '@/components/tasks/partials/Labels.vue'
 import ChecklistSummary from './ChecklistSummary.vue'
 import CommentCount from './CommentCount.vue'
+import Dropdown from '@/components/misc/Dropdown.vue'
+import DropdownItem from '@/components/misc/DropdownItem.vue'
 
 import {getHexColor} from '@/models/task'
 import type {ITask} from '@/modelTypes/ITask'
@@ -151,6 +187,9 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
 	'taskCompletedRecurring': [task: ITask]
+	'duplicateTask': [task: ITask]
+	'saveAsTemplate': [task: ITask]
+	'taskArchived': [task: ITask]
 }>()
 
 const router = useRouter()
@@ -204,12 +243,34 @@ async function toggleTaskDone(task: ITask) {
 	}
 }
 
+async function archiveTask(task: ITask) {
+	loadingInternal.value = true
+	try {
+		const updatedTask = await useTaskStore().update({
+			...task,
+			done: !task.done,
+		})
+
+		if (updatedTask.done) {
+			playPopSound()
+		}
+
+		emit('taskArchived', updatedTask)
+	} finally {
+		loadingInternal.value = false
+	}
+}
+
 function openTaskDetail() {
 	router.push({
 		name: 'task.detail',
 		params: {id: props.task.id},
 		state: {backdropView: router.currentRoute.value.fullPath},
 	})
+}
+
+function openContextMenu() {
+	emit('duplicateTask', props.task)
 }
 
 const coverImageBlobUrl = ref<string | null>(null)
@@ -391,6 +452,25 @@ $task-background: var(--white);
 	margin-inline-end: .25rem;
 }
 
+.card-menu {
+	opacity: 0;
+	transition: opacity $transition-duration;
+
+	:deep(.dropdown-trigger) {
+		padding: 0 .15rem;
+		border-radius: $radius;
+
+		&:hover {
+			background: var(--grey-200);
+		}
+	}
+}
+
+.task:hover .card-menu,
+.task .card-menu:has(.dropdown-menu[style]) {
+	opacity: 1;
+}
+
 .task-progress {
 	margin: 8px 0 0;
 	inline-size: 100%;
@@ -401,5 +481,11 @@ $task-background: var(--white);
 	background: var(--grey-100);
 	border-radius: $radius;
 	padding: 0.25rem;
+}
+
+.auto-gen-indicator {
+	color: var(--warning);
+	font-size: .75rem;
+	margin-inline-end: .25rem;
 }
 </style>
