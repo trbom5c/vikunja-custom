@@ -619,7 +619,13 @@ function onHandleTouchMove(e: TouchEvent) {
 	}
 }
 
-const buckets = computed(() => kanbanStore.buckets)
+const buckets = computed(() => {
+	const all = kanbanStore.buckets
+	if (hideDoneTasks.value && view.value?.doneBucketId) {
+		return all.filter(b => b.id !== view.value.doneBucketId)
+	}
+	return all
+})
 const loading = computed(() => kanbanStore.isLoading)
 const projectIdWithFallback = computed<number>(() => project.value?.id || projectId.value)
 
