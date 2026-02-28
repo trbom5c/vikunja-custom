@@ -132,6 +132,62 @@
 						<span>Mark cards with completed due dates as done</span>
 					</label>
 				</div>
+
+				<!-- Trello API Connection (optional) -->
+				<div class="trello-api-section">
+					<button
+						type="button"
+						class="trello-api-toggle"
+						@click="showTrelloApi = !showTrelloApi"
+					>
+						<Icon :icon="showTrelloApi ? 'chevron-down' : 'chevron-right'" />
+						<span>Connect Trello API</span>
+						<span class="trello-api-badge" v-if="trelloApiValid === true">✓ Connected</span>
+						<span class="trello-api-badge is-optional" v-else>Optional</span>
+					</button>
+					<div v-if="showTrelloApi" class="trello-api-fields">
+						<p class="trello-api-desc">
+							Provide your Trello API key and token to unlock enhanced import:
+							<strong>all comments</strong> (JSON export caps at 1,000 total actions) and
+							<strong>attachment downloads</strong> (files are re-uploaded to Vikunja).
+						</p>
+						<p class="trello-api-desc">
+							Get credentials at
+							<a href="https://trello.com/power-ups/admin" target="_blank" rel="noopener">trello.com/power-ups/admin</a>
+							→ your Power-Up → API Key tab. Then click the Token link to generate a read-only token.
+						</p>
+						<div class="trello-api-inputs">
+							<input
+								v-model="trelloApiKey"
+								type="text"
+								class="input"
+								placeholder="API Key (32 chars)"
+								autocomplete="off"
+							>
+							<input
+								v-model="trelloApiToken"
+								type="password"
+								class="input"
+								placeholder="API Token (64 chars)"
+								autocomplete="off"
+							>
+							<button
+								type="button"
+								class="button is-small"
+								:disabled="!hasTrelloApi || trelloApiTesting"
+								@click="testTrelloApi"
+							>
+								{{ trelloApiTesting ? 'Testing...' : 'Test Connection' }}
+							</button>
+						</div>
+						<div v-if="trelloApiValid === true" class="trello-api-status is-success">
+							✓ API connection verified. All comments and attachments will be imported via API.
+						</div>
+						<div v-if="trelloApiValid === false" class="trello-api-status is-error">
+							✗ Connection failed. Check your key and token. Import will use JSON data only.
+						</div>
+					</div>
+				</div>
 			</div>
 
 			<!-- List Selection -->
@@ -234,6 +290,10 @@
 					<strong>{{ importStats.comments }}</strong>
 					<span>{{ importStats.comments === 1 ? 'comment' : 'comments' }}</span>
 				</div>
+				<div class="complete-stat" v-if="importStats.attachments > 0">
+					<strong>{{ importStats.attachments }}</strong>
+					<span>{{ importStats.attachments === 1 ? 'attachment' : 'attachments' }}</span>
+				</div>
 			</div>
 			<div v-if="importStats.errors > 0" class="complete-errors">
 				<Message variant="warning">
@@ -320,7 +380,7 @@ const createdProjectId = ref<number>(0)
 const progressPercent = ref(0)
 const progressText = ref('')
 const importLog = ref<Array<{type: string, message: string}>>([])
-const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 })
+const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0, attachments: 0 })
 
 // ── Options ──
 const options = ref({
@@ -335,6 +395,28 @@ const options = ref({
 	markDueCompleteAsDone: true,
 })
 
+// ── Trello API credentials (optional, for enhanced import) ──
+const trelloApiKey = ref('')
+const trelloApiToken = ref('')
+const showTrelloApi = ref(false)
+const trelloApiValid = ref<boolean | null>(null)  // null=untested, true=valid, false=invalid
+const trelloApiTesting = ref(false)
+
+const hasTrelloApi = computed(() => trelloApiKey.value.length >= 32 && trelloApiToken.value.length >= 32)
+
+async function testTrelloApi() {
+	if (!hasTrelloApi.value) return
+	trelloApiTesting.value = true
+	trelloApiValid.value = null
+	try {
+		const resp = await fetch(`https://api.trello.com/1/members/me?key=${trelloApiKey.value}&token=${trelloApiToken.value}`)
+		trelloApiValid.value = resp.ok
+	} catch {
+		trelloApiValid.value = false
+	}
+	trelloApiTesting.value = false
+}
+
 const selectedListIds = ref<Set<string>>(new Set())
 const logCopied = ref(false)
 
@@ -344,7 +426,7 @@ function getLogText(): string {
 		`Project: ${options.value.projectName}\n` +
 		`Tasks: ${importStats.value.tasks} | Labels: ${importStats.value.labels} | ` +
 		`Dates: ${importStats.value.datesSet} | Done: ${importStats.value.doneCount} | ` +
-		`Buckets: ${importStats.value.buckets} | Comments: ${importStats.value.comments} | Errors: ${importStats.value.errors}\n` +
+		`Buckets: ${importStats.value.buckets} | Comments: ${importStats.value.comments} | Attachments: ${importStats.value.attachments} | Errors: ${importStats.value.errors}\n` +
 		'─'.repeat(60) + '\n'
 	return header + importLog.value.map(e => `[${e.type.toUpperCase()}] ${e.message}`).join('\n')
 }
@@ -470,7 +552,7 @@ function resetImport() {
 	isImporting.value = false
 	importComplete.value = false
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0, attachments: 0 }
 	progressPercent.value = 0
 	progressText.value = ''
 	parseError.value = ''
@@ -570,7 +652,97 @@ async function createCommentRaw(taskId: number, comment: string): Promise<any> {
 
 	return response.json()
 }
-//
+// ─────────────────────────────────────────────────────────────
+// Trello API helpers (used when API key + token are provided)
+// ─────────────────────────────────────────────────────────────
+
+// Fetch ALL comment actions for a board via paginated API calls.
+// Returns a Map<cardId, action[]> just like the JSON-based commentMap.
+async function fetchAllCommentsViaApi(boardId: string, apiKey: string, apiToken: string, logFn: (type: string, msg: string) => void): Promise<Map<string, any[]>> {
+	const commentMap = new Map<string, any[]>()
+	let before: string | null = null
+	let totalFetched = 0
+	const maxPages = 50  // safety limit
+
+	for (let page = 0; page < maxPages; page++) {
+		let url = `https://api.trello.com/1/boards/${boardId}/actions?filter=commentCard&limit=1000&key=${apiKey}&token=${apiToken}`
+		if (before) url += `&before=${before}`
+
+		const resp = await fetch(url)
+		if (!resp.ok) {
+			logFn('error', `Trello API error fetching comments: HTTP ${resp.status}`)
+			break
+		}
+
+		const actions: any[] = await resp.json()
+		if (actions.length === 0) break
+
+		for (const action of actions) {
+			if (action.data?.card?.id && action.data?.text) {
+				const cardId = action.data.card.id
+				const existing = commentMap.get(cardId) || []
+				existing.push(action)
+				commentMap.set(cardId, existing)
+			}
+		}
+
+		totalFetched += actions.length
+		// Paginate using the ID of the last action
+		before = actions[actions.length - 1].id
+
+		if (actions.length < 1000) break  // no more pages
+	}
+
+	// Sort chronologically within each card
+	for (const [, comments] of commentMap) {
+		comments.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+	}
+
+	if (totalFetched > 0) {
+		logFn('info', `Trello API: fetched ${totalFetched} comments across ${commentMap.size} cards`)
+	}
+
+	return commentMap
+}
+
+// Download an attachment from Trello and upload it to a Vikunja task.
+// Returns the Vikunja attachment object (with id, file info) or null on failure.
+async function downloadAndUploadAttachment(
+	trelloCardId: string,
+	attachment: any,
+	vikunjaTaskId: number,
+	apiKey: string,
+	apiToken: string,
+): Promise<any | null> {
+	// Download from Trello API (requires auth in query params for download endpoint)
+	const downloadUrl = `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}?key=${apiKey}&token=${apiToken}`
+
+	const dlResp = await fetch(downloadUrl)
+	if (!dlResp.ok) return null
+
+	const blob = await dlResp.blob()
+	const fileName = attachment.name || attachment.fileName || 'attachment'
+
+	// Upload to Vikunja
+	const vikunjaToken = getAuthToken()
+	const formData = new FormData()
+	formData.append('files', new File([blob], fileName, { type: attachment.mimeType || blob.type || 'application/octet-stream' }))
+
+	const uploadResp = await fetch(`/api/v1/tasks/${vikunjaTaskId}/attachments`, {
+		method: 'PUT',
+		headers: {
+			'Authorization': 'Bearer ' + vikunjaToken,
+		},
+		body: formData,
+	})
+
+	if (!uploadResp.ok) return null
+
+	const result = await uploadResp.json()
+	// Vikunja returns { success: { id, ... } } or an array
+	if (result?.success) return result.success
+	return null
+}
 // Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When
 // a project is created it auto-creates views including a Kanban
 // view with default buckets (To-Do, Doing, Done).
@@ -681,7 +853,7 @@ async function assignTaskToBucket(projectId: number, viewId: number, bucketId: n
 async function startImport() {
 	isImporting.value = true
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0, attachments: 0 }
 
 	const projectService = new ProjectService()
 	const labelService = new LabelService()
@@ -907,27 +1079,39 @@ async function startImport() {
 		}
 
 		// ─────────────────────────────────────────────────────
-		// PHASE 4b: Build comment lookup from board.actions
-		// Trello stores comments as actions with type 'commentCard'.
-		// Each action has data.card.id pointing to the card, data.text
-		// with the comment body, and memberCreator with author info.
-		const commentMap = new Map<string, any[]>()
+		// PHASE 4b: Build comment lookup
+		// When Trello API credentials are available, fetch ALL comments via
+		// paginated API calls (the JSON export caps total actions at 1,000).
+		// Otherwise fall back to the JSON actions array.
+		let commentMap = new Map<string, any[]>()
 		if (options.value.importComments) {
-			const actions = board.actions || []
-			for (const action of actions) {
-				if (action.type === 'commentCard' && action.data?.card?.id && action.data?.text) {
-					const cardId = action.data.card.id
-					const existing = commentMap.get(cardId) || []
-					existing.push(action)
-					commentMap.set(cardId, existing)
+			if (hasTrelloApi.value && trelloApiValid.value && board.id) {
+				updateProgress('Fetching all comments via Trello API...')
+				try {
+					commentMap = await fetchAllCommentsViaApi(board.id, trelloApiKey.value, trelloApiToken.value, log)
+				} catch (apiErr: any) {
+					log('error', `Trello API comment fetch failed, falling back to JSON: ${apiErr?.message || apiErr}`)
+					// Fall through to JSON fallback below
 				}
 			}
-			// Sort comments chronologically (oldest first) within each card
-			for (const [, comments] of commentMap) {
-				comments.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
-			}
-			if (commentMap.size > 0) {
-				log('info', `Found ${[...commentMap.values()].reduce((n, c) => n + c.length, 0)} comments across ${commentMap.size} cards`)
+
+			// Fallback: use JSON actions if API didn't run or failed
+			if (commentMap.size === 0) {
+				const actions = board.actions || []
+				for (const action of actions) {
+					if (action.type === 'commentCard' && action.data?.card?.id && action.data?.text) {
+						const cardId = action.data.card.id
+						const existing = commentMap.get(cardId) || []
+						existing.push(action)
+						commentMap.set(cardId, existing)
+					}
+				}
+				for (const [, comments] of commentMap) {
+					comments.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+				}
+				if (commentMap.size > 0) {
+					log('info', `Found ${[...commentMap.values()].reduce((n, c) => n + c.length, 0)} comments across ${commentMap.size} cards (from JSON, capped at 1000 total actions)`)
+				}
 			}
 		}
 
@@ -1107,6 +1291,68 @@ async function startImport() {
 					}
 				}
 
+				// ── Download & re-upload attachments via Trello API ──
+				// When API credentials are available, download each uploaded
+				// attachment from Trello and upload it to Vikunja. Then update
+				// the task description to embed images and link files.
+				if (hasTrelloApi.value && trelloApiValid.value && task.id && card.attachments?.length > 0) {
+					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string}> = []
+					for (const att of card.attachments) {
+						// Only download actual uploads, not linked URLs
+						if (!att.isUpload) continue
+						try {
+							const vikunjaAtt = await downloadAndUploadAttachment(
+								card.id, att, task.id,
+								trelloApiKey.value, trelloApiToken.value,
+							)
+							if (vikunjaAtt) {
+								uploadedAtts.push({
+									name: att.name || att.fileName || 'file',
+									vikunjaId: vikunjaAtt.id,
+									mimeType: att.mimeType || '',
+								})
+								importStats.value.attachments++
+							}
+						} catch (attErr: any) {
+							log('error', `Attachment "${att.name}" failed for "${card.name}": ${attErr?.message || attErr}`)
+						}
+					}
+
+					// Rebuild description: replace Trello attachment links with Vikunja URLs
+					if (uploadedAtts.length > 0) {
+						let newDesc = task.description || ''
+						// Remove the old "### Attachments" section we built from JSON
+						newDesc = newDesc.replace(/\n?\n?### Attachments\n[\s\S]*$/, '')
+
+						if (newDesc.trim()) newDesc += '\n\n'
+						newDesc += '### Attachments\n'
+						for (const ua of uploadedAtts) {
+							const url = `/api/v1/tasks/${task.id}/attachments/${ua.vikunjaId}`
+							const isImage = ua.mimeType.startsWith('image/')
+							if (isImage) {
+								newDesc += `![${ua.name}](${url})\n`
+							} else {
+								newDesc += `- [${ua.name}](${url})\n`
+							}
+						}
+
+						// Update the task description via API
+						try {
+							const token = getAuthToken()
+							await fetch(`/api/v1/tasks/${task.id}`, {
+								method: 'POST',
+								headers: {
+									'Authorization': 'Bearer ' + token,
+									'Content-Type': 'application/json',
+								},
+								body: JSON.stringify({ description: newDesc.trim() }),
+							})
+						} catch {
+							// Description update failed, attachments still exist on task
+						}
+					}
+				}
+
 				importStats.value.tasks++
 			} catch (e: any) {
 				log('error', `Failed to import card "${card.name}": ${e?.message || e}`)
@@ -1121,7 +1367,7 @@ async function startImport() {
 		await projectStore.loadAllProjects()
 
 		progressPercent.value = 100
-		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates, ${importStats.value.doneCount} marked done, ${importStats.value.buckets} kanban columns, ${importStats.value.comments} comments).`)
+		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates, ${importStats.value.doneCount} marked done, ${importStats.value.buckets} kanban columns, ${importStats.value.comments} comments, ${importStats.value.attachments} attachments).`)
 
 	} catch (e: any) {
 		log('error', `Import failed: ${e?.message || e}`)
@@ -1539,5 +1785,87 @@ async function startImport() {
 	display: flex;
 	gap: 0.75rem;
 	margin-block-start: 1.5rem;
+}
+
+.trello-api-section {
+	margin-block-start: 1rem;
+	border-top: 1px solid var(--grey-200);
+	padding-block-start: 1rem;
+}
+
+.trello-api-toggle {
+	background: none;
+	border: none;
+	color: var(--grey-500);
+	cursor: pointer;
+	font-size: .95rem;
+	display: flex;
+	align-items: center;
+	gap: .4rem;
+	padding: .25rem 0;
+
+	&:hover {
+		color: var(--primary);
+	}
+}
+
+.trello-api-badge {
+	font-size: .75rem;
+	padding: .1rem .5rem;
+	border-radius: 1rem;
+	background: var(--success);
+	color: #fff;
+	font-weight: 600;
+
+	&.is-optional {
+		background: var(--grey-300);
+		color: var(--grey-600);
+		font-weight: 400;
+	}
+}
+
+.trello-api-fields {
+	margin-block-start: .75rem;
+	padding-inline-start: 1.25rem;
+}
+
+.trello-api-desc {
+	font-size: .85rem;
+	color: var(--grey-500);
+	margin-block-end: .5rem;
+	line-height: 1.4;
+
+	a {
+		color: var(--primary);
+	}
+}
+
+.trello-api-inputs {
+	display: flex;
+	gap: .5rem;
+	flex-wrap: wrap;
+	margin-block: .75rem;
+
+	.input {
+		flex: 1;
+		min-inline-size: 200px;
+	}
+}
+
+.trello-api-status {
+	font-size: .85rem;
+	padding: .4rem .75rem;
+	border-radius: $radius;
+	margin-block-start: .5rem;
+
+	&.is-success {
+		background: rgba(var(--success-rgb, 72, 199, 142), 0.15);
+		color: var(--success);
+	}
+
+	&.is-error {
+		background: rgba(var(--danger-rgb, 255, 56, 96), 0.15);
+		color: var(--danger);
+	}
 }
 </style>
