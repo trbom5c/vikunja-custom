@@ -1279,7 +1279,7 @@ func (p *Project) Delete(s *xorm.Session, a web.Auth) (err error) {
 	}
 
 	// Clean up auto-task templates that reference this project
-	cleanAutoTaskTemplateProjectRefs(s, p.ID)
+	cleanAutoTaskTemplateProjectRefs(s, p.ID, fullProject.Title)
 
 	err = events.Dispatch(&ProjectDeletedEvent{
 		Project: fullProject,
@@ -1377,7 +1377,9 @@ SELECT id FROM descendant_ids`,
 
 // cleanAutoTaskTemplateProjectRefs removes a deleted project ID from all
 // auto-task templates that reference it in their project_ids JSON array.
-func cleanAutoTaskTemplateProjectRefs(s *xorm.Session, deletedProjectID int64) {
+// A log entry is written to auto_task_log recording what was removed.
+// If all targets are gone the template is deactivated.
+func cleanAutoTaskTemplateProjectRefs(s *xorm.Session, deletedProjectID int64, projectTitle string) {
 	var templates []*AutoTaskTemplate
 	err := s.Find(&templates)
 	if err != nil {
@@ -1385,7 +1387,6 @@ func cleanAutoTaskTemplateProjectRefs(s *xorm.Session, deletedProjectID int64) {
 		return
 	}
 
-	deletedStr := fmt.Sprintf("%d", deletedProjectID)
 	for _, tmpl := range templates {
 		if len(tmpl.ProjectIDs) == 0 {
 			continue
@@ -1404,11 +1405,36 @@ func cleanAutoTaskTemplateProjectRefs(s *xorm.Session, deletedProjectID int64) {
 		}
 
 		tmpl.ProjectIDs = filtered
-		_, err := s.ID(tmpl.ID).Cols("project_ids").Update(tmpl)
-		if err != nil {
-			log.Errorf("Error removing project %s from auto-task template %d: %v", deletedStr, tmpl.ID, err)
+
+		if len(filtered) == 0 {
+			// All target projects are gone — deactivate
+			tmpl.Active = false
+			_, err = s.ID(tmpl.ID).Cols("project_ids", "active").Update(tmpl)
+			if err != nil {
+				log.Errorf("Error deactivating auto-task template %d: %v", tmpl.ID, err)
+				continue
+			}
+			log.Warningf("Auto-task template %d deactivated: last target project \"%s\" (ID %d) was deleted", tmpl.ID, projectTitle, deletedProjectID)
 		} else {
-			log.Infof("Removed deleted project %s from auto-task template %d", deletedStr, tmpl.ID)
+			_, err = s.ID(tmpl.ID).Cols("project_ids").Update(tmpl)
+			if err != nil {
+				log.Errorf("Error updating auto-task template %d: %v", tmpl.ID, err)
+				continue
+			}
+			log.Infof("Removed project \"%s\" (ID %d) from auto-task template %d (%d targets remaining)", projectTitle, deletedProjectID, tmpl.ID, len(filtered))
 		}
+
+		// Write an audit entry in the generation log so it's visible on the card
+		note := fmt.Sprintf("Target project \"%s\" (ID %d) was deleted and removed", projectTitle, deletedProjectID)
+		if len(filtered) == 0 {
+			note += " — template deactivated (no remaining targets)"
+		}
+		auditLog := &AutoTaskLog{
+			TemplateID:  tmpl.ID,
+			TaskID:      0,
+			TriggerType: "system",
+			Note:        note,
+		}
+		_, _ = s.Insert(auditLog)
 	}
 }

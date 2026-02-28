@@ -96,6 +96,8 @@ type AutoTaskLog struct {
 	TriggerType string    `xorm:"varchar(20) not null" json:"trigger_type"`
 	// The user who triggered (null for system cron)
 	TriggeredByID int64  `xorm:"bigint null" json:"triggered_by_id"`
+	// System note for audit entries (e.g. project removed)
+	Note          string    `xorm:"text null" json:"note,omitempty"`
 	Created       time.Time `xorm:"created not null" json:"created"`
 
 	// Enrichment fields (populated after load, not in DB)
