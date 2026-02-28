@@ -202,12 +202,19 @@ func (a *AutoTaskTemplate) Update(s *xorm.Session, _ web.Auth) error {
 		a.NextDueAt = &updated
 	}
 
-	_, err := s.ID(a.ID).Cols(
+	affected, err := s.ID(a.ID).Cols(
 		"title", "description", "project_ids", "priority", "hex_color",
 		"label_ids", "assignee_ids",
 		"interval_value", "interval_unit", "start_date", "end_date",
 		"active", "next_due_at",
 	).Update(a)
+	fmt.Printf("[AutoTask Update] affected=%d err=%v\n", affected, err)
+
+	// Debug: read back to verify
+	verify := &AutoTaskTemplate{}
+	has, _ := s.ID(a.ID).Get(verify)
+	fmt.Printf("[AutoTask Verify] has=%v ProjectIDs=%v Title=%q\n", has, verify.ProjectIDs, verify.Title)
+
 	return err
 }
 
