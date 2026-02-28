@@ -56,26 +56,10 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 			continue
 		}
 
-		// Check: does an open (not done) task already exist for this template?
-		// If so, skip creation — the user needs to complete it first.
-		// But still advance next_due_at so the UI shows the next scheduled time.
-		openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
-		if err != nil {
-			return nil, err
-		}
-		if openCount > 0 {
-			// Advance next_due_at past now so display shows future schedule
-			nextDue := advanceFromTime(now, tmpl.IntervalValue, tmpl.IntervalUnit)
-			tmpl.NextDueAt = &nextDue
-			_, _ = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
-			continue
-		}
-
-		// No open task exists. Before creating a new one, check if a task was
-		// recently completed that we haven't processed yet (OnAutoTaskCompleted
-		// isn't hooked into the task update path). Find the most recently
-		// completed task for this template and advance next_due_at from its
-		// completion time.
+		// Before creating, check if a task was recently completed that we
+		// haven't processed yet (OnAutoTaskCompleted isn't hooked into the
+		// task update path). Find the most recently completed task for this
+		// template and advance next_due_at from its completion time.
 		type doneInfo struct {
 			ID     int64     `xorm:"'id'"`
 			DoneAt time.Time `xorm:"'done_at'"`
@@ -233,6 +217,16 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 			continue
 		}
 
+		// Skip if an open (not done) task already exists for this template in this project
+		openInProject, err := s.Where("auto_template_id = ? AND project_id = ? AND done = ?", tmpl.ID, projectID, false).Count(&Task{})
+		if err != nil {
+			return nil, fmt.Errorf("auto-task open check project %d: %w", projectID, err)
+		}
+		if openInProject > 0 {
+			log.Debugf("auto-task template %d: skipping project %d — open task already exists", tmpl.ID, projectID)
+			continue
+		}
+
 		task := &Task{
 			Title:          tmpl.Title,
 			Description:    tmpl.Description,
@@ -243,7 +237,7 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 			AutoTemplateID: tmpl.ID,
 		}
 
-		err := createTask(s, task, u, false, true)
+		err = createTask(s, task, u, false, true)
 		if err != nil {
 			return nil, fmt.Errorf("auto-task create failed for template %d in project %d: %w", tmpl.ID, projectID, err)
 		}
