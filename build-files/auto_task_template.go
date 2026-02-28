@@ -37,7 +37,7 @@ type AutoTaskTemplate struct {
 	OwnerID int64      `xorm:"bigint not null INDEX" json:"-"`
 	Owner   *user.User `xorm:"-" json:"owner" valid:"-"`
 	// The projects to create tasks in. Empty = user's default project.
-	ProjectIDs []int64 `xorm:"json null" json:"project_ids"`
+	ProjectIDs []int64 `xorm:"'project_ids' json null" json:"project_ids"`
 	// The task title.
 	Title string `xorm:"varchar(250) not null" json:"title" valid:"required,runelength(1|250)" minLength:"1" maxLength:"250"`
 	// Optional description for the generated task.
@@ -47,9 +47,9 @@ type AutoTaskTemplate struct {
 	// Task color in hex.
 	HexColor string `xorm:"varchar(7) null" json:"hex_color" valid:"runelength(0|7)" maxLength:"7"`
 	// Label IDs to apply to generated tasks.
-	LabelIDs []int64 `xorm:"json null" json:"label_ids"`
+	LabelIDs []int64 `xorm:"'label_ids' json null" json:"label_ids"`
 	// User IDs to assign to generated tasks.
-	AssigneeIDs []int64 `xorm:"json null" json:"assignee_ids"`
+	AssigneeIDs []int64 `xorm:"'assignee_ids' json null" json:"assignee_ids"`
 
 	// -- Scheduling --
 	// The numeric interval value (e.g. 1, 7, 14).
