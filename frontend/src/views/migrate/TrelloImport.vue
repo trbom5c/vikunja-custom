@@ -1831,24 +1831,28 @@ async function startImport() {
 }
 
 .trello-api-section {
-	margin-block-start: 1rem;
-	border-top: 1px solid var(--grey-200);
+	margin-block-start: 1.25rem;
 	padding-block-start: 1rem;
 }
 
 .trello-api-toggle {
-	background: none;
-	border: none;
-	color: var(--grey-500);
+	background: var(--grey-100);
+	border: 1px dashed var(--primary);
+	border-radius: .5rem;
+	color: var(--primary);
 	cursor: pointer;
 	font-size: .95rem;
+	font-weight: 500;
 	display: flex;
 	align-items: center;
-	gap: .4rem;
-	padding: .25rem 0;
+	gap: .5rem;
+	padding: .5rem .85rem;
+	width: 100%;
+	transition: background .15s, border-color .15s;
 
 	&:hover {
-		color: var(--primary);
+		background: color-mix(in srgb, var(--primary) 8%, transparent);
+		border-style: solid;
 	}
 }
 
@@ -1859,11 +1863,13 @@ async function startImport() {
 	background: var(--success);
 	color: #fff;
 	font-weight: 600;
+	margin-inline-start: auto;
 
 	&.is-optional {
-		background: var(--grey-300);
-		color: var(--grey-600);
-		font-weight: 400;
+		background: color-mix(in srgb, var(--primary) 15%, transparent);
+		color: var(--primary);
+		font-weight: 500;
+		border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
 	}
 }
 
