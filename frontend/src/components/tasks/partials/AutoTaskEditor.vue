@@ -427,12 +427,25 @@
 								<Icon :icon="logEntryIcon(entry)" />
 							</div>
 							<div class="log-entry-detail">
-								<span class="log-entry-type">
-									{{ logEntryLabel(entry) }}
-								</span>
-								<span class="log-entry-task-ref">
-									{{ entry.task_title || ('Task #' + entry.task_id) }}
-								</span>
+								<template v-if="entry.trigger_type === 'system' && entry.note">
+									<span class="log-entry-type">
+										<Icon icon="info-circle" class="meta-inline-icon" />
+										System
+									</span>
+									<span class="log-entry-note">
+										{{ entry.note }}
+									</span>
+								</template>
+								<template v-else>
+									<span class="log-entry-type">
+										{{ logEntryLabel(entry) }}
+									</span>
+									<span class="log-entry-task-ref">
+										{{ entry.task_title || ('Task #' + entry.task_id) }}
+										<span v-if="entry.project_name" class="log-entry-project">
+											→ {{ entry.project_name }}
+										</span>
+									</span>
 								<div class="log-entry-meta">
 									<span
 										v-if="entry.trigger_type !== 'completed' && entry.task_done && entry.task_done_at"
@@ -466,6 +479,7 @@
 										{{ entry.comment_count }} {{ entry.comment_count === 1 ? $t('task.autoTask.comment') : $t('task.autoTask.comments') }}
 									</span>
 								</div>
+								</template>
 							</div>
 							<span class="log-entry-date">{{ formatDate(entry.created) }}</span>
 						</div>
@@ -739,6 +753,7 @@ function logEntryIcon(entry: any): string | string[] {
 	switch (entry.trigger_type) {
 		case 'completed': return 'check'
 		case 'manual': return 'user'
+		case 'system': return 'info-circle'
 		default: return 'bolt'
 	}
 }
@@ -747,6 +762,7 @@ function logEntryLabel(entry: any): string {
 	switch (entry.trigger_type) {
 		case 'completed': return t('task.autoTask.logCompleted')
 		case 'manual': return t('task.autoTask.logManual')
+		case 'system': return 'System'
 		default: return t('task.autoTask.logSystem')
 	}
 }
@@ -1108,6 +1124,18 @@ defineExpose({openCreate})
 .log-entry-task-ref {
 	font-weight: 600;
 	font-size: .9rem;
+}
+
+.log-entry-project {
+	font-weight: 400;
+	font-size: .8rem;
+	color: var(--grey-400);
+}
+
+.log-entry-note {
+	font-size: .85rem;
+	color: var(--warning);
+	font-style: italic;
 }
 
 .meta-inline-icon {

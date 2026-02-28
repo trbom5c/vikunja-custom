@@ -123,7 +123,8 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 }
 
 // TriggerAutoTask manually creates a task from an auto-task template immediately,
-// regardless of its schedule. Respects the "one open instance" rule.
+// regardless of its schedule. Per-project duplicate checking is handled inside
+// createAutoTaskInstance — projects that already have an open task are skipped.
 func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, error) {
 	tmpl := &AutoTaskTemplate{}
 	has, err := s.Where("id = ? AND owner_id = ?", templateID, u.ID).Get(tmpl)
@@ -132,15 +133,6 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 	}
 	if !has {
 		return nil, ErrAutoTaskTemplateNotFound{ID: templateID}
-	}
-
-	// Check for existing open instance
-	openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
-	if err != nil {
-		return nil, err
-	}
-	if openCount > 0 {
-		return nil, fmt.Errorf("an open task already exists for this template — complete it first")
 	}
 
 	return createAutoTaskInstance(s, tmpl, u, "manual")

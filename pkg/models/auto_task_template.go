@@ -107,6 +107,7 @@ type AutoTaskLog struct {
 	TaskDoneByName string     `xorm:"-" json:"task_done_by_name"`
 	TaskUpdated    *time.Time `xorm:"-" json:"task_updated"`
 	CommentCount   int64      `xorm:"-" json:"comment_count"`
+	ProjectName    string     `xorm:"-" json:"project_name,omitempty"`
 }
 
 // TableName returns the table name for xorm.
@@ -327,22 +328,27 @@ func enrichAutoTaskLogs(s *xorm.Session, logs []*AutoTaskLog) {
 
 	// Batch load task info via raw SQL
 	type taskInfo struct {
-		ID       int64     `xorm:"'id'"`
-		Title    string    `xorm:"'title'"`
-		Done     int       `xorm:"'done'"`
-		DoneAt   time.Time `xorm:"'done_at'"`
-		DoneByID int64     `xorm:"'done_by_id'"`
-		Updated  time.Time `xorm:"'updated'"`
+		ID        int64     `xorm:"'id'"`
+		Title     string    `xorm:"'title'"`
+		Done      int       `xorm:"'done'"`
+		DoneAt    time.Time `xorm:"'done_at'"`
+		DoneByID  int64     `xorm:"'done_by_id'"`
+		Updated   time.Time `xorm:"'updated'"`
+		ProjectID int64     `xorm:"'project_id'"`
 	}
 	tasks := make([]*taskInfo, 0)
-	_ = s.SQL("SELECT id, title, done, done_at, COALESCE(done_by_id, 0) as done_by_id, updated FROM tasks WHERE id IN (" + ids + ")").Find(&tasks)
+	_ = s.SQL("SELECT id, title, done, done_at, COALESCE(done_by_id, 0) as done_by_id, updated, project_id FROM tasks WHERE id IN (" + ids + ")").Find(&tasks)
 
 	taskMap := make(map[int64]*taskInfo)
 	userIDs := make(map[int64]bool)
+	projectIDs := make(map[int64]bool)
 	for _, t := range tasks {
 		taskMap[t.ID] = t
 		if t.DoneByID > 0 {
 			userIDs[t.DoneByID] = true
+		}
+		if t.ProjectID > 0 {
+			projectIDs[t.ProjectID] = true
 		}
 	}
 
@@ -384,11 +390,34 @@ func enrichAutoTaskLogs(s *xorm.Session, logs []*AutoTaskLog) {
 		countMap[c.TaskID] = c.Count
 	}
 
+	// Batch load project names
+	type projectInfo struct {
+		ID    int64  `xorm:"'id'"`
+		Title string `xorm:"'title'"`
+	}
+	projectMap := make(map[int64]string)
+	if len(projectIDs) > 0 {
+		pids := make([]int64, 0, len(projectIDs))
+		for pid := range projectIDs {
+			pids = append(pids, pid)
+		}
+		projects := make([]*projectInfo, 0)
+		_ = s.SQL("SELECT id, title FROM projects WHERE id IN (" + inClause(pids) + ")").Find(&projects)
+		for _, p := range projects {
+			projectMap[p.ID] = p.Title
+		}
+	}
+
 	// Enrich each log entry
 	for _, l := range logs {
 		if t, ok := taskMap[l.TaskID]; ok {
 			l.TaskTitle = t.Title
 			l.TaskDone = t.Done != 0
+			if t.ProjectID > 0 {
+				if name, ok := projectMap[t.ProjectID]; ok {
+					l.ProjectName = name
+				}
+			}
 			if !t.DoneAt.IsZero() {
 				doneAt := t.DoneAt
 				l.TaskDoneAt = &doneAt
