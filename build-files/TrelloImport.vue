@@ -120,6 +120,14 @@
 
 				<div class="option-row">
 					<label class="option-label">
+						<input v-model="options.importComments" type="checkbox">
+						<span>Import comments</span>
+					</label>
+					<span class="option-desc">{{ boardCommentCount }} comments found</span>
+				</div>
+
+				<div class="option-row">
+					<label class="option-label">
 						<input v-model="options.markDueCompleteAsDone" type="checkbox">
 						<span>Mark cards with completed due dates as done</span>
 					</label>
@@ -222,6 +230,10 @@
 					<strong>{{ importStats.buckets }}</strong>
 					<span>kanban {{ importStats.buckets === 1 ? 'column' : 'columns' }}</span>
 				</div>
+				<div class="complete-stat" v-if="importStats.comments > 0">
+					<strong>{{ importStats.comments }}</strong>
+					<span>{{ importStats.comments === 1 ? 'comment' : 'comments' }}</span>
+				</div>
 			</div>
 			<div v-if="importStats.errors > 0" class="complete-errors">
 				<Message variant="warning">
@@ -308,7 +320,7 @@ const createdProjectId = ref<number>(0)
 const progressPercent = ref(0)
 const progressText = ref('')
 const importLog = ref<Array<{type: string, message: string}>>([])
-const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 })
+const importStats = ref({ projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 })
 
 // ── Options ──
 const options = ref({
@@ -319,6 +331,7 @@ const options = ref({
 	importClosedLists: false,
 	importChecklists: true,
 	importLabels: true,
+	importComments: true,
 	markDueCompleteAsDone: true,
 })
 
@@ -331,7 +344,7 @@ function getLogText(): string {
 		`Project: ${options.value.projectName}\n` +
 		`Tasks: ${importStats.value.tasks} | Labels: ${importStats.value.labels} | ` +
 		`Dates: ${importStats.value.datesSet} | Done: ${importStats.value.doneCount} | ` +
-		`Buckets: ${importStats.value.buckets} | Errors: ${importStats.value.errors}\n` +
+		`Buckets: ${importStats.value.buckets} | Comments: ${importStats.value.comments} | Errors: ${importStats.value.errors}\n` +
 		'─'.repeat(60) + '\n'
 	return header + importLog.value.map(e => `[${e.type.toUpperCase()}] ${e.message}`).join('\n')
 }
@@ -377,6 +390,10 @@ const openLists = computed(() => (boardData.value?.lists || []).filter((l: any) 
 const openCards = computed(() => (boardData.value?.cards || []).filter((c: any) => !c.closed))
 const boardLabels = computed(() => (boardData.value?.labels || []).filter((l: any) => l.name))
 const boardChecklists = computed(() => boardData.value?.checklists || [])
+const boardCommentCount = computed(() => {
+	const actions = boardData.value?.actions || []
+	return actions.filter((a: any) => a.type === 'commentCard').length
+})
 const closedCardCount = computed(() => (boardData.value?.cards || []).filter((c: any) => c.closed).length)
 const closedListCount = computed(() => (boardData.value?.lists || []).filter((l: any) => l.closed).length)
 
@@ -453,7 +470,7 @@ function resetImport() {
 	isImporting.value = false
 	importComplete.value = false
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 }
 	progressPercent.value = 0
 	progressText.value = ''
 	parseError.value = ''
@@ -527,7 +544,32 @@ async function createTaskRaw(projectId: number, payload: Record<string, any>): P
 }
 
 // ─────────────────────────────────────────────────────────────
-// Kanban bucket helpers
+// createCommentRaw()
+//
+// Create a comment on a task via PUT /api/v1/tasks/{id}/comments.
+// Trello comments include author and date — we prepend a header
+// line with the original author name and timestamp so the
+// context is preserved even though Vikunja assigns the comment
+// to the importing user.
+// ─────────────────────────────────────────────────────────────
+async function createCommentRaw(taskId: number, comment: string): Promise<any> {
+	const token = getAuthToken()
+	const response = await fetch(`/api/v1/tasks/${taskId}/comments`, {
+		method: 'PUT',
+		headers: {
+			'Authorization': 'Bearer ' + token,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ comment }),
+	})
+
+	if (!response.ok) {
+		const errBody = await response.text()
+		throw new Error(`HTTP ${response.status}: ${errBody}`)
+	}
+
+	return response.json()
+}
 //
 // Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When
 // a project is created it auto-creates views including a Kanban
@@ -639,7 +681,7 @@ async function assignTaskToBucket(projectId: number, viewId: number, bucketId: n
 async function startImport() {
 	isImporting.value = true
 	importLog.value = []
-	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0 }
+	importStats.value = { projects: 0, tasks: 0, labels: 0, errors: 0, datesSet: 0, buckets: 0, doneCount: 0, comments: 0 }
 
 	const projectService = new ProjectService()
 	const labelService = new LabelService()
@@ -865,6 +907,30 @@ async function startImport() {
 		}
 
 		// ─────────────────────────────────────────────────────
+		// PHASE 4b: Build comment lookup from board.actions
+		// Trello stores comments as actions with type 'commentCard'.
+		// Each action has data.card.id pointing to the card, data.text
+		// with the comment body, and memberCreator with author info.
+		const commentMap = new Map<string, any[]>()
+		if (options.value.importComments) {
+			const actions = board.actions || []
+			for (const action of actions) {
+				if (action.type === 'commentCard' && action.data?.card?.id && action.data?.text) {
+					const cardId = action.data.card.id
+					const existing = commentMap.get(cardId) || []
+					existing.push(action)
+					commentMap.set(cardId, existing)
+				}
+			}
+			// Sort comments chronologically (oldest first) within each card
+			for (const [, comments] of commentMap) {
+				comments.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+			}
+			if (commentMap.size > 0) {
+				log('info', `Found ${[...commentMap.values()].reduce((n, c) => n + c.length, 0)} comments across ${commentMap.size} cards`)
+			}
+		}
+
 		// PHASE 5: Import cards as tasks
 		//
 		// KEY FIX: We use createTaskRaw() — a direct fetch()
@@ -1023,6 +1089,24 @@ async function startImport() {
 					}
 				}
 
+				// ── Import comments ──
+				// Trello stores comments in board.actions with type 'commentCard'
+				if (options.value.importComments && task.id) {
+					const cardComments = commentMap.get(card.id) || []
+					for (const comment of cardComments) {
+						try {
+							// Prepend original Trello author + date as header
+							const author = comment.memberCreator?.fullName || comment.memberCreator?.username || 'Unknown'
+							const date = comment.date ? new Date(comment.date).toLocaleString() : ''
+							const header = `**${author}** — ${date}\n\n`
+							await createCommentRaw(task.id, header + comment.data.text)
+							importStats.value.comments++
+						} catch (commentErr: any) {
+							log('error', `Comment import failed for "${card.name}": ${commentErr?.message || commentErr}`)
+						}
+					}
+				}
+
 				importStats.value.tasks++
 			} catch (e: any) {
 				log('error', `Failed to import card "${card.name}": ${e?.message || e}`)
@@ -1037,7 +1121,7 @@ async function startImport() {
 		await projectStore.loadAllProjects()
 
 		progressPercent.value = 100
-		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates, ${importStats.value.doneCount} marked done, ${importStats.value.buckets} kanban columns).`)
+		log('success', `Import complete! ${importStats.value.tasks} tasks across ${importStats.value.projects} projects (${importStats.value.datesSet} with dates, ${importStats.value.doneCount} marked done, ${importStats.value.buckets} kanban columns, ${importStats.value.comments} comments).`)
 
 	} catch (e: any) {
 		log('error', `Import failed: ${e?.message || e}`)
