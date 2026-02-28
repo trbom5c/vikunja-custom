@@ -670,26 +670,11 @@ async function startImport() {
 	try {
 		// ─────────────────────────────────────────────────────
 		// PHASE 1: Create parent project
-		// Check for name collision and auto-suffix if needed.
 		// ─────────────────────────────────────────────────────
 		updateProgress('Creating project...')
-
-		const projectStore = useProjectStore()
-		const existingProjects = Object.values(projectStore.projects) as any[]
-		let finalName = options.value.projectName
-		const baseName = finalName
-		let suffix = 1
-		while (existingProjects.some((p: any) => p.title === finalName)) {
-			suffix++
-			finalName = `${baseName} (${suffix})`
-		}
-		if (finalName !== baseName) {
-			log('info', `Project "${baseName}" already exists — importing as "${finalName}"`)
-		}
-
-		log('info', `Creating project "${finalName}"`)
+		log('info', `Creating project "${options.value.projectName}"`)
 		const parentProject = await projectService.create(new ProjectModel({
-			title: finalName,
+			title: options.value.projectName,
 			description: board.desc || '',
 		}))
 		createdProjectId.value = parentProject.id
@@ -1011,7 +996,6 @@ async function startImport() {
 						}
 					} catch (bucketErr: any) {
 						log('error', `Bucket assign failed for "${card.name}": ${bucketErr?.message || bucketErr}`)
-						importStats.value.errors++
 					}
 				}
 
@@ -1049,6 +1033,7 @@ async function startImport() {
 		// ─────────────────────────────────────────────────────
 		// PHASE 6: Refresh and finish
 		// ─────────────────────────────────────────────────────
+		const projectStore = useProjectStore()
 		await projectStore.loadAllProjects()
 
 		progressPercent.value = 100
@@ -1470,6 +1455,5 @@ async function startImport() {
 	display: flex;
 	gap: 0.75rem;
 	margin-block-start: 1.5rem;
-	padding-block-end: 2rem;
 }
 </style>
