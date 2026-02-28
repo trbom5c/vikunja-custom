@@ -1306,10 +1306,22 @@ async function startImport() {
 				// attachment from Trello and upload it to Vikunja. Then update
 				// the task description to embed images and link files.
 				if (hasTrelloApi.value && trelloApiValid.value && task.id && card.attachments?.length > 0) {
+					log('info', `Card "${card.name}" has ${card.attachments.length} attachment(s)`)
 					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string}> = []
 					for (const att of card.attachments) {
-						// Only download actual uploads, not linked URLs
-						if (!att.isUpload) continue
+						// Only download actual uploads, not linked URLs.
+						// The JSON export may not include isUpload, so we also
+						// check if the URL points to Trello's attachment hosting.
+						const isTrelloHosted = att.url && (
+							att.url.startsWith('https://trello.com/1/cards/') ||
+							att.url.startsWith('https://trello-attachments.s3.') ||
+							att.url.startsWith('https://trello.com/1/') ||
+							att.url.includes('trello-backgrounds') ||
+							att.url.includes('trello-attachments')
+						)
+						const isUpload = att.isUpload === true || (att.isUpload === undefined && isTrelloHosted)
+						log('info', `  Attachment "${att.name}": isUpload=${att.isUpload}, isTrelloHosted=${isTrelloHosted}, willDownload=${isUpload}, url=${att.url?.substring(0, 80)}`)
+						if (!isUpload) continue
 						try {
 							const vikunjaAtt = await downloadAndUploadAttachment(
 								card.id, att, task.id,
