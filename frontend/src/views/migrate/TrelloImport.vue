@@ -1611,17 +1611,18 @@ async function startImport() {
 	gap: 0.5rem;
 	padding: 0.6rem 0.8rem;
 	border-radius: 8px;
-	background: var(--grey-100);
+	background: var(--card-background, var(--grey-100));
+	border: 1px solid transparent;
 	cursor: pointer;
 	transition: all 150ms ease;
 
 	&:hover {
-		background: var(--grey-200);
+		border-color: var(--grey-300);
 	}
 
 	&.is-selected {
-		background: var(--primary-light);
-		border: 1px solid var(--primary);
+		background: color-mix(in srgb, var(--primary) 12%, var(--card-background, var(--grey-100)));
+		border-color: var(--primary);
 	}
 
 	&.is-closed {

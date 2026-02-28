@@ -17,29 +17,28 @@
 package v1
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
+	"strings"
 
 	"github.com/labstack/echo/v5"
-)
-
-// trelloAttURLPattern extracts cardId and attachmentId from a Trello attachment URL.
-var trelloAttURLPattern = regexp.MustCompile(
-	`https://(?:api\.)?trello\.com/1/cards/([a-f0-9]+)/attachments/([a-f0-9]+)`,
 )
 
 // TrelloProxyDownload proxies a download request to the Trello API,
 // avoiding CORS issues when the browser fetches Trello attachments.
 //
-// Two-step flow:
-//  1. Fetch attachment metadata from Trello API to get the pre-signed download URL
-//  2. Fetch the actual file from that pre-signed URL (no auth needed)
+// Trello requires the Authorization header (not query params) for
+// attachment downloads since the "Authenticated Access to S3" change.
+// See: https://community.developer.atlassian.com/t/update-authenticated-access-to-s3/43681
+//
+// Equivalent curl:
+//
+//	curl -H 'Authorization: OAuth oauth_consumer_key="KEY", oauth_token="TOKEN"' \
+//	  https://api.trello.com/1/cards/{cardId}/attachments/{attachmentId}/download/{filename}
 //
 // POST /api/v1/trello/proxy-download
-// Body: { "url": "https://api.trello.com/1/cards/.../attachments/.../download/file.jpg", "key": "...", "token": "..." }
+// Body: { "url": "https://api.trello.com/1/cards/.../download/file.jpg", "key": "...", "token": "..." }
 func TrelloProxyDownload(c *echo.Context) error {
 	var req struct {
 		URL   string `json:"url"`
@@ -54,72 +53,46 @@ func TrelloProxyDownload(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "url, key, and token are required")
 	}
 
-	// Extract cardId and attachmentId from the URL
-	matches := trelloAttURLPattern.FindStringSubmatch(req.URL)
-	if len(matches) < 3 {
+	// Only allow proxying to Trello API domains
+	if !strings.HasPrefix(req.URL, "https://api.trello.com/1/cards") &&
+		!strings.HasPrefix(req.URL, "https://trello.com/1/cards") {
 		return echo.NewHTTPError(http.StatusBadRequest, "url must be a Trello card attachment URL")
 	}
-	cardID := matches[1]
-	attachmentID := matches[2]
 
-	// Step 1: Fetch attachment metadata to get the pre-signed download URL
-	metaURL := fmt.Sprintf(
-		"https://api.trello.com/1/cards/%s/attachments/%s?key=%s&token=%s",
-		cardID, attachmentID, req.Key, req.Token,
+	// Build the request with OAuth Authorization header (required since S3 auth change)
+	httpReq, err := http.NewRequest("GET", req.URL, nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid URL: %v", err))
+	}
+	httpReq.Header.Set("Authorization",
+		fmt.Sprintf(`OAuth oauth_consumer_key="%s", oauth_token="%s"`, req.Key, req.Token),
 	)
 
-	metaResp, err := http.Get(metaURL) // nolint:gosec
+	// Execute the request
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch attachment metadata: %v", err))
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch from Trello: %v", err))
 	}
-	defer metaResp.Body.Close()
+	defer resp.Body.Close()
 
-	if metaResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(metaResp.Body, 1024))
-		return echo.NewHTTPError(metaResp.StatusCode, fmt.Sprintf("Trello metadata %d: %s", metaResp.StatusCode, string(body)))
-	}
-
-	var meta struct {
-		URL      string `json:"url"`
-		MimeType string `json:"mimeType"`
-		Name     string `json:"name"`
-	}
-	if err := json.NewDecoder(metaResp.Body).Decode(&meta); err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to parse attachment metadata: %v", err))
-	}
-
-	if meta.URL == "" {
-		return echo.NewHTTPError(http.StatusBadGateway, "Trello attachment metadata has no download URL")
-	}
-
-	// Step 2: Fetch the actual file from the pre-signed URL
-	fileResp, err := http.Get(meta.URL) // nolint:gosec
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to download file: %v", err))
-	}
-	defer fileResp.Body.Close()
-
-	if fileResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(fileResp.Body, 1024))
-		return echo.NewHTTPError(fileResp.StatusCode, fmt.Sprintf("file download %d: %s", fileResp.StatusCode, string(body)))
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return echo.NewHTTPError(resp.StatusCode, fmt.Sprintf("Trello returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Stream the response back
-	contentType := fileResp.Header.Get("Content-Type")
+	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		if meta.MimeType != "" {
-			contentType = meta.MimeType
-		} else {
-			contentType = "application/octet-stream"
-		}
+		contentType = "application/octet-stream"
 	}
 
-	if cd := fileResp.Header.Get("Content-Disposition"); cd != "" {
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
 		c.Response().Header().Set("Content-Disposition", cd)
 	}
-	if cl := fileResp.Header.Get("Content-Length"); cl != "" {
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		c.Response().Header().Set("Content-Length", cl)
 	}
 
-	return c.Stream(http.StatusOK, contentType, fileResp.Body)
+	return c.Stream(http.StatusOK, contentType, resp.Body)
 }
