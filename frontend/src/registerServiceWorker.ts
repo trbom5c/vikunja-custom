@@ -27,7 +27,7 @@ if (import.meta.env.PROD) {
 			console.log('No internet connection found. App is running in offline mode.')
 		},
 		error(error) {
-			console.error('Error during service worker registration:', error)
+			console.warn('Service worker registration unavailable:', error.message || error)
 		},
 	})
 }
