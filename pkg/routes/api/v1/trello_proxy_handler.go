@@ -20,8 +20,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // TrelloProxyDownload proxies a download request to the Trello API,
@@ -31,7 +32,7 @@ import (
 //
 // POST /api/v1/trello/proxy-download
 // Body: { "url": "https://api.trello.com/1/cards/.../download/file.jpg", "key": "...", "token": "..." }
-func TrelloProxyDownload(c echo.Context) error {
+func TrelloProxyDownload(c *echo.Context) error {
 	var req struct {
 		URL   string `json:"url"`
 		Key   string `json:"key"`
@@ -46,26 +47,20 @@ func TrelloProxyDownload(c echo.Context) error {
 	}
 
 	// Only allow proxying to Trello API domains
-	if len(req.URL) < 30 ||
-		(req.URL[:30] != "https://api.trello.com/1/cards" &&
-			req.URL[:26] != "https://trello.com/1/cards") {
+	if !strings.HasPrefix(req.URL, "https://api.trello.com/1/cards") &&
+		!strings.HasPrefix(req.URL, "https://trello.com/1/cards") {
 		return echo.NewHTTPError(http.StatusBadRequest, "url must be a Trello card attachment URL")
 	}
 
 	// Append auth to the Trello URL
 	separator := "?"
-	if len(req.URL) > 0 {
-		for _, ch := range req.URL {
-			if ch == '?' {
-				separator = "&"
-				break
-			}
-		}
+	if strings.Contains(req.URL, "?") {
+		separator = "&"
 	}
 	trelloURL := fmt.Sprintf("%s%skey=%s&token=%s", req.URL, separator, req.Key, req.Token)
 
 	// Fetch from Trello
-	resp, err := http.Get(trelloURL)
+	resp, err := http.Get(trelloURL) // nolint:gosec
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch from Trello: %v", err))
 	}
@@ -77,15 +72,18 @@ func TrelloProxyDownload(c echo.Context) error {
 	}
 
 	// Stream the response back
-	c.Response().Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
-		c.Response().Header().Set("Content-Length", cl)
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
+
+	// Set additional headers before streaming
 	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
 		c.Response().Header().Set("Content-Disposition", cd)
 	}
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		c.Response().Header().Set("Content-Length", cl)
+	}
 
-	c.Response().WriteHeader(http.StatusOK)
-	_, err = io.Copy(c.Response().Writer, resp.Body)
-	return err
+	return c.Stream(http.StatusOK, contentType, resp.Body)
 }
