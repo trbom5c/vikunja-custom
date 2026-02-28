@@ -12,21 +12,30 @@ import {error, success, warning} from '@/message'
 import {useAuthStore} from '@/stores/auth'
 import {useTaskStore} from '@/stores/tasks'
 import type {IProjectView} from '@/modelTypes/IProjectView'
-import {useUserPreferences} from '@/composables/useUserPreferences'
-
 // Cascade prompt style: 'toast' = sticky pulse toast, 'modal' = confirm dialog overlay
+// Uses localStorage for synchronous reads; API sync handled by useUserPreferences elsewhere
 function getCascadePromptStyle(): 'toast' | 'modal' {
-	const prefs = useUserPreferences()
-	const val = prefs.get('gantt-cascade-prompt-style', 'toast')
-	if (val === 'modal' || val === 'toast') return val
+	try {
+		const val = localStorage.getItem('vikunja-user-preferences')
+		if (val) {
+			const prefs = JSON.parse(val)
+			const style = prefs['gantt-cascade-prompt-style']
+			if (style === 'modal' || style === 'toast') return style
+		}
+	} catch {}
 	return 'toast'
 }
 
 // Cascade mode: 'bulk' = shift all at once, 'individual' = confirm each
 function getCascadeMode(): 'bulk' | 'individual' {
-	const prefs = useUserPreferences()
-	const val = prefs.get('gantt-cascade-mode', 'bulk')
-	if (val === 'bulk' || val === 'individual') return val
+	try {
+		const val = localStorage.getItem('vikunja-user-preferences')
+		if (val) {
+			const prefs = JSON.parse(val)
+			const mode = prefs['gantt-cascade-mode']
+			if (mode === 'bulk' || mode === 'individual') return mode
+		}
+	} catch {}
 	return 'bulk'
 }
 export interface CascadePreview {

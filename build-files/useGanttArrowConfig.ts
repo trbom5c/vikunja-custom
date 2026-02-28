@@ -1,5 +1,4 @@
-import {reactive, watch} from 'vue'
-import {useUserPreferences} from '@/composables/useUserPreferences'
+import {reactive, watch, type WatchStopHandle} from 'vue'
 
 const STORAGE_KEY = 'gantt-arrow-config'
 
@@ -58,50 +57,91 @@ const DEFAULTS: GanttArrowConfig = {
 	palette: 'multi',
 }
 
-function loadConfig(): GanttArrowConfig {
-	// Safe: only called from within useGanttArrowConfig() which runs inside component setup
-	const prefs = useUserPreferences()
-	const raw = prefs.get(STORAGE_KEY, '')
-	if (raw) {
-		try {
+// ── Lazy singleton state ──
+// The reactive config object is created once on first use.
+// useUserPreferences is ONLY imported dynamically to avoid TDZ errors
+// from module-scope composable access.
+let arrowConfig: ReturnType<typeof reactive<GanttArrowConfig>> | null = null
+let initialized = false
+let saveWatchStop: WatchStopHandle | null = null
+
+/**
+ * Load config from localStorage first (synchronous, always available),
+ * then async-hydrate from the user preferences API.
+ */
+function loadFromLocalStorage(): GanttArrowConfig {
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY)
+		if (raw) {
 			return {...DEFAULTS, ...JSON.parse(raw)}
-		} catch {}
-	}
+		}
+	} catch {}
 	return {...DEFAULTS}
 }
 
-function saveConfig(config: GanttArrowConfig) {
-	const prefs = useUserPreferences()
-	prefs.set(STORAGE_KEY, JSON.stringify(config))
+function saveToLocalStorage(config: GanttArrowConfig) {
+	try {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+	} catch {}
 }
-
-// Lazy singleton — initialized on first use inside a component, not at module scope
-let arrowConfig: ReturnType<typeof reactive<GanttArrowConfig>> | null = null
-let initialized = false
 
 function ensureInitialized() {
 	if (initialized) return
 	initialized = true
 
-	arrowConfig = reactive<GanttArrowConfig>(loadConfig())
+	// 1. Immediate: load from localStorage (always works, no composable needed)
+	arrowConfig = reactive<GanttArrowConfig>(loadFromLocalStorage())
 
-	// Re-hydrate once preferences are loaded from API
-	const {loaded: prefsLoaded} = useUserPreferences()
-	watch(prefsLoaded, (isLoaded) => {
-		if (isLoaded && arrowConfig) {
-			const fresh = loadConfig()
-			const freshJson = JSON.stringify(fresh)
-			const currentJson = JSON.stringify(arrowConfig)
-			if (freshJson !== currentJson) {
-				Object.assign(arrowConfig, fresh)
-			}
-		}
-	}, {immediate: true})
-
-	// Auto-save on any change
-	watch(arrowConfig, (val) => {
-		saveConfig(val)
+	// 2. Auto-save to localStorage on any change
+	saveWatchStop = watch(arrowConfig, (val) => {
+		saveToLocalStorage(val)
 	}, {deep: true})
+
+	// 3. Deferred: async-import useUserPreferences to hydrate from API
+	//    and set up API persistence. This avoids any TDZ issues from
+	//    importing the composable at module scope.
+	import('@/composables/useUserPreferences').then(({useUserPreferences}) => {
+		try {
+			const prefs = useUserPreferences()
+
+			// Hydrate from API if prefs are already loaded
+			const apiRaw = prefs.get(STORAGE_KEY, '')
+			if (apiRaw && arrowConfig) {
+				try {
+					const apiConfig = {...DEFAULTS, ...JSON.parse(apiRaw)}
+					const apiJson = JSON.stringify(apiConfig)
+					const currentJson = JSON.stringify(arrowConfig)
+					if (apiJson !== currentJson) {
+						Object.assign(arrowConfig, apiConfig)
+					}
+				} catch {}
+			}
+
+			// Watch for prefs loaded (API might not be ready yet)
+			watch(() => prefs.loaded, (isLoaded) => {
+				if (isLoaded && arrowConfig) {
+					const freshRaw = prefs.get(STORAGE_KEY, '')
+					if (freshRaw) {
+						try {
+							const fresh = {...DEFAULTS, ...JSON.parse(freshRaw)}
+							const freshJson = JSON.stringify(fresh)
+							const currentJson = JSON.stringify(arrowConfig)
+							if (freshJson !== currentJson) {
+								Object.assign(arrowConfig, fresh)
+							}
+						} catch {}
+					}
+				}
+			}, {immediate: true})
+
+			// Also persist to API on changes (in addition to localStorage)
+			watch(arrowConfig!, (val) => {
+				prefs.set(STORAGE_KEY, JSON.stringify(val))
+			}, {deep: true})
+		} catch {}
+	}).catch(() => {
+		// useUserPreferences not available — localStorage-only mode, which is fine
+	})
 }
 
 export function useGanttArrowConfig() {
