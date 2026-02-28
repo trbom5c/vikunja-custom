@@ -59,6 +59,8 @@ type Task struct {
 	Done bool `xorm:"INDEX null" json:"done"`
 	// The time when a task was marked as done. This field is system-controlled and cannot be set via API.
 	DoneAt time.Time `xorm:"INDEX null 'done_at'" json:"done_at"`
+	// The ID of the user who marked the task as done. This field is system-controlled and cannot be set via API.
+	DoneByID int64 `xorm:"bigint null 'done_by_id'" json:"done_by_id"`
 	// The time when the task is due.
 	DueDate time.Time `xorm:"DATETIME INDEX null 'due_date'" json:"due_date"`
 	// An array of reminders that are associated with this task.
@@ -81,6 +83,8 @@ type Task struct {
 	Labels []*Label `xorm:"-" json:"labels"`
 	// The task color in hex
 	HexColor string `xorm:"varchar(6) null" json:"hex_color" valid:"runelength(0|7)" maxLength:"7"`
+	// If this task was generated from an auto-task template, this is the template's ID.
+	AutoTemplateID int64 `xorm:"bigint null 'auto_template_id'" json:"auto_template_id"`
 	// Determines how far a task is left from being done
 	PercentDone float64 `xorm:"DOUBLE null" json:"percent_done"`
 
@@ -1244,6 +1248,13 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 	updateDoneAt := updateDone(&ot, t)
 	if updateDoneAt {
 		colsToUpdate = append(colsToUpdate, "done_at")
+		// Track who completed (or uncompleted) the task
+		if t.Done {
+			t.DoneByID = a.GetID()
+		} else {
+			t.DoneByID = 0
+		}
+		colsToUpdate = append(colsToUpdate, "done_by_id")
 	}
 
 	// Update the reminders
@@ -1379,6 +1390,14 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 		return err
 	}
 	t.Updated = nt.Updated
+
+	// If a task was just marked as done and it was generated from an auto-task template,
+	// advance the template's next_due_at so the next instance can be created on schedule.
+	if updateDoneAt && t.Done {
+		if err := OnAutoTaskCompleted(s, t); err != nil {
+			log.Errorf("Error handling auto-task completion for task %d: %s", t.ID, err)
+		}
+	}
 
 	doer, _ := user.GetFromAuth(a)
 	err = events.Dispatch(&TaskUpdatedEvent{
