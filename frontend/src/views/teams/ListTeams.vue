@@ -1,17 +1,25 @@
 <template>
 	<div
-		class="content loader-container is-max-width-desktop"
+		class="content-widescreen loader-container"
 		:class="{ 'is-loading': teamService.loading}"
 	>
-		<XButton
-			:to="{name:'teams.create'}"
-			class="is-pulled-right"
-			icon="plus"
-		>
-			{{ $t('team.create.title') }}
-		</XButton>
+		<h2>{{ $t('team.title') }}</h2>
+		<p class="has-text-grey">
+			{{ $t('team.description') }}
+		</p>
 
-		<h1>{{ $t('team.title') }}</h1>
+		<hr class="page-separator">
+
+		<div class="tab-actions">
+			<XButton
+				:to="{name:'teams.create'}"
+				icon="plus"
+				:shadow="false"
+			>
+				{{ $t('team.create.title') }}
+			</XButton>
+		</div>
+
 		<ul
 			v-if="teams.length > 0"
 			class="teams box"
@@ -29,7 +37,7 @@
 		</ul>
 		<p
 			v-else-if="!teamService.loading"
-			class="has-text-centered has-text-grey is-italic"
+			class="has-text-centered has-text-grey p-4"
 		>
 			{{ $t('team.noTeams') }}
 			<RouterLink :to="{name: 'teams.create'}">
@@ -57,6 +65,22 @@ teamService.getAll().then((result) => {
 </script>
 
 <style lang="scss" scoped>
+.content-widescreen {
+	max-inline-size: 900px;
+	margin: 0 auto;
+	padding: 1.5rem 1rem;
+}
+
+.page-separator {
+	border: none;
+	border-block-start: 2px solid var(--grey-200);
+	margin-block: 1rem 1.5rem;
+}
+
+.tab-actions {
+	margin-block-end: 1.5rem;
+}
+
 ul.teams {
   padding: 0;
   margin-inline-start: 0;
