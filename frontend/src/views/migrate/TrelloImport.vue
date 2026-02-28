@@ -1200,6 +1200,16 @@ async function startImport() {
 					done: false,
 				}
 
+				// ── Card cover color ──
+				// Trello cards can have a solid color cover (no attachment).
+				// Map it to Vikunja's hex_color for the task.
+				if (card.cover?.color && !card.cover?.idAttachment) {
+					const coverHex = trelloColorToHex(card.cover.color)
+					if (coverHex) {
+						payload.hex_color = coverHex
+					}
+				}
+
 				// ── Date mapping ──
 				// Trello card.due and card.start are ISO 8601 strings
 				// like "2025-10-28T00:00:00.000Z".  We convert to Date
@@ -1326,7 +1336,7 @@ async function startImport() {
 				// the task description to embed images and link files.
 				if (hasTrelloApi.value && trelloApiValid.value && task.id && card.attachments?.length > 0) {
 					log('info', `Card "${card.name}" has ${card.attachments.length} attachment(s)`)
-					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string}> = []
+					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string, trelloAttId: string}> = []
 					for (const att of card.attachments) {
 						// Only download actual uploads, not linked URLs.
 						// The JSON export may not include isUpload, so we also
@@ -1351,6 +1361,7 @@ async function startImport() {
 									name: att.name || att.fileName || 'file',
 									vikunjaId: vikunjaAtt.id,
 									mimeType: att.mimeType || '',
+									trelloAttId: att.id || '',
 								})
 								importStats.value.attachments++
 								log('success', `  Uploaded attachment "${att.name}" (id=${vikunjaAtt.id})`)
@@ -1393,6 +1404,28 @@ async function startImport() {
 							})
 						} catch {
 							// Description update failed, attachments still exist on task
+						}
+
+						// Set cover image if the Trello card had one
+						const coverId = card.idAttachmentCover || card.cover?.idAttachment
+						if (coverId) {
+							const coverAtt = uploadedAtts.find(ua => ua.trelloAttId === coverId)
+							if (coverAtt) {
+								try {
+									const token = getAuthToken()
+									await fetch(`/api/v1/tasks/${task.id}`, {
+										method: 'POST',
+										headers: {
+											'Authorization': 'Bearer ' + token,
+											'Content-Type': 'application/json',
+										},
+										body: JSON.stringify({ cover_image_attachment_id: coverAtt.vikunjaId }),
+									})
+									log('info', `  Set cover image for "${card.name}" (attachment ${coverAtt.vikunjaId})`)
+								} catch {
+									// Cover update failed, not critical
+								}
+							}
 						}
 					}
 				}
