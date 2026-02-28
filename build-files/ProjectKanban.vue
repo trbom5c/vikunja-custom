@@ -14,6 +14,14 @@
 					:project-id="projectId"
 					@update:modelValue="updateFilters"
 				/>
+				<label class="hide-done-toggle">
+					<input
+						type="checkbox"
+						v-model="hideDoneTasks"
+						@change="onHideDoneToggle"
+					>
+					{{ $t('project.kanban.hideDoneTasks') }}
+				</label>
 				<XButton
 					v-if="canWrite"
 					variant="secondary"
@@ -241,6 +249,7 @@
 												@taskCompletedRecurring="handleRecurringTaskCompletion"
 												@duplicateTask="openDuplicateTaskModal"
 												@saveAsTemplate="openSaveAsTemplateModal"
+												@taskArchived="handleTaskArchived"
 											/>
 										</div>
 									</template>
@@ -434,6 +443,53 @@ const newTaskInputFocused = ref(false)
 const showSetLimitInput = ref(false)
 const collapsedBuckets = ref<CollapsedBuckets>({})
 
+// Hide done tasks toggle — persisted per project in localStorage
+const hideDoneStorageKey = computed(() => `kanban-hide-done-${projectId.value}`)
+const hideDoneTasks = ref(false)
+
+// Load persisted state
+watch(projectId, () => {
+	try {
+		hideDoneTasks.value = localStorage.getItem(hideDoneStorageKey.value) === 'true'
+	} catch {
+		hideDoneTasks.value = false
+	}
+	applyDoneFilter()
+}, {immediate: true})
+
+function applyDoneFilter() {
+	if (hideDoneTasks.value) {
+		// Append done=false filter if not already present
+		const currentFilter = params.value.filter || ''
+		if (!currentFilter.includes('done = false')) {
+			params.value.filter = currentFilter
+				? `(${currentFilter}) && done = false`
+				: 'done = false'
+		}
+	} else {
+		// Remove done=false filter
+		let f = params.value.filter || ''
+		f = f.replace(/\s*&&\s*done\s*=\s*false/, '')
+		f = f.replace(/\((.+)\)\s*&&\s*done\s*=\s*false/, '$1')
+		f = f.replace(/^done\s*=\s*false\s*&&\s*/, '')
+		f = f.replace(/^done\s*=\s*false$/, '')
+		// Clean up leftover wrapping parens from our pattern
+		if (f.startsWith('(') && f.endsWith(')') && !f.includes('&&')) {
+			f = f.slice(1, -1)
+		}
+		params.value.filter = f.trim()
+	}
+}
+
+function onHideDoneToggle() {
+	try {
+		localStorage.setItem(hideDoneStorageKey.value, String(hideDoneTasks.value))
+	} catch { /* ignore */ }
+	applyDoneFilter()
+	// Trigger reload
+	kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+}
+
 // We're using this to show the loading animation only at the task when updating it
 const taskUpdating = ref<{ [id: ITask['id']]: boolean }>({})
 const oneTaskUpdating = ref(false)
@@ -453,6 +509,7 @@ const params = ref<TaskFilterParams>({
 watch([filter, s], ([filterValue, sValue]) => {
 	params.value.filter = filterValue ?? ''
 	params.value.s = sValue ?? ''
+	applyDoneFilter()
 }, { immediate: true })
 
 function updateFilters(newParams: TaskFilterParams) {
@@ -961,6 +1018,18 @@ function openSaveAsTemplateModal(task: ITask) {
 	showSaveAsTemplateModal.value = true
 }
 
+function handleTaskArchived(task: ITask) {
+	if (hideDoneTasks.value && task.done) {
+		// Task was marked done and we're hiding done tasks — remove from view
+		kanbanStore.removeTaskInBucket(task)
+	} else if (!task.done) {
+		// Task was unarchived — reload to show it in the right place
+		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+	}
+	// Update the task in the store so the card reflects the new state
+	kanbanStore.setTaskInBucket(task)
+}
+
 function openCreateFromTemplateModal() {
 	showCreateFromTemplateModal.value = true
 }
@@ -990,6 +1059,29 @@ function unCollapseBucket(bucket: IBucket) {
 
 	--loader-border-color: var(--grey-500);
   }
+}
+
+.hide-done-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: .4rem;
+	font-size: .85rem;
+	color: var(--grey-600);
+	cursor: pointer;
+	padding: .25rem .5rem;
+	border-radius: $radius;
+	margin-inline-start: .5rem;
+	user-select: none;
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--grey-100);
+	}
+
+	input[type="checkbox"] {
+		cursor: pointer;
+		margin: 0;
+	}
 }
 </style>
 

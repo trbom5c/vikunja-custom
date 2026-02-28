@@ -72,6 +72,12 @@
 						>
 							{{ $t('task.template.saveAsTemplate') }}
 						</DropdownItem>
+						<DropdownItem
+							:icon="task.done ? 'box-open' : 'box-archive'"
+							@click.stop="archiveTask(task)"
+						>
+							{{ task.done ? $t('task.kanbanArchive.unarchive') : $t('task.kanbanArchive.archive') }}
+						</DropdownItem>
 					</Dropdown>
 				</div>
 			</div>
@@ -183,6 +189,7 @@ const emit = defineEmits<{
 	'taskCompletedRecurring': [task: ITask]
 	'duplicateTask': [task: ITask]
 	'saveAsTemplate': [task: ITask]
+	'taskArchived': [task: ITask]
 }>()
 
 const router = useRouter()
@@ -231,6 +238,24 @@ async function toggleTaskDone(task: ITask) {
 		if (isRecurringTask && wasBeingMarkedDone && updatedTask.done) {
 			emit('taskCompletedRecurring', updatedTask)
 		}
+	} finally {
+		loadingInternal.value = false
+	}
+}
+
+async function archiveTask(task: ITask) {
+	loadingInternal.value = true
+	try {
+		const updatedTask = await useTaskStore().update({
+			...task,
+			done: !task.done,
+		})
+
+		if (updatedTask.done) {
+			playPopSound()
+		}
+
+		emit('taskArchived', updatedTask)
 	} finally {
 		loadingInternal.value = false
 	}

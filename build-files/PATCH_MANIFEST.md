@@ -136,6 +136,8 @@ Every file in the `build-files/` directory and where it lands in the Vikunja sou
 | ListProjects.vue | `views/project/` | REPLACE | Modernized layout |
 | ShowTasks.vue | `views/tasks/` | REPLACE | Filters, assigned-to-me |
 | TaskDetailView.vue | `views/tasks/` | REPLACE | Task detail modifications |
+| TrelloImport.vue | `views/migrate/` | NEW | Trello JSON import with 3 Kanban modes |
+| Migration.vue | `views/migrate/` | REPLACE | Migration hub with Trello JSON link |
 
 ## Frontend — Gantt Helpers (`frontend/src/views/project/helpers/`)
 
@@ -168,9 +170,9 @@ Every file in the `build-files/` directory and where it lands in the Vikunja sou
 
 ## File Counts
 
-- **Total patch files:** ~92
-- **New files (don't exist upstream):** ~47
-- **Replaced files (overwrite upstream):** ~42
+- **Total patch files:** ~94
+- **New files (don't exist upstream):** ~48
+- **Replaced files (overwrite upstream):** ~43
 - **Documentation:** 4
 - **Go backend files:** ~28
-- **Vue/TS frontend files:** ~60
+- **Vue/TS frontend files:** ~62

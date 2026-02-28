@@ -2,6 +2,33 @@
 
 All notable changes to this custom Vikunja build.
 
+## Phase 4: Trello Import + Kanban Archive (2026-02-28)
+
+### Trello JSON Import (RC1 → Stable)
+- Client-side Trello JSON import — no API keys or OAuth needed
+- Three Kanban modes: Simple (To-Do/Done), Replicate Trello Board, Skip
+- Replicate mode creates one Kanban column per Trello list with correct ordering
+- Full metadata: labels (30 color variants), checklists as markdown, attachments as links
+- Done status from `card.closed` and `card.dueComplete` + option toggle
+- Date mapping optimized for Gantt (start/due → start_date/end_date/due_date)
+- Real-time import log with Copy and Download (.log file)
+- Import options: archived cards, closed lists, per-list toggles with card counts
+- Verified with 460-task board — 0 errors
+- Accessible via Migration hub (`/migrate`) with Trello JSON card
+
+### Kanban Archive (Hide Done Tasks)
+- "Archive" button in Kanban card dropdown menu — marks task as done (or undone to unarchive)
+- "Hide done tasks" checkbox in Kanban header — filters out completed tasks from all columns
+- Toggle state persisted per-project in localStorage
+- Archived tasks remain in the project and are visible in List, Table, and Gantt views
+- Unarchive via card menu restores task visibility when filter is toggled off
+
+### Documentation
+- TrelloImport.vue and Migration.vue added to PATCH_MANIFEST.md
+- Updated file counts
+
+---
+
 ## Phase 3: Gantt Polish + User Preferences (2026-02-27)
 
 ### User Preferences API (Account-Synced Settings)

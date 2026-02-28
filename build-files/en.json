@@ -436,7 +436,8 @@
 			"bucketTitleSavedSuccess": "The bucket title has been saved successfully.",
 			"bucketLimitSavedSuccess": "The bucket limit been saved successfully.",
 			"collapse": "Collapse this bucket",
-			"bucketLimitReached": "You have reached the bucket limit. Remove tasks or increase the limit to add new tasks."
+			"bucketLimitReached": "You have reached the bucket limit. Remove tasks or increase the limit to add new tasks.",
+			"hideDoneTasks": "Hide done tasks"
 		},
 		"pseudo": {
 			"favorites": {
@@ -859,6 +860,10 @@
 			"deleteConfirmText": "Are you sure you want to delete the template \"{title}\"? This cannot be undone.",
 			"deleteSuccess": "The template was deleted.",
 			"createFromTemplateSuccess": "Task created from template."
+		},
+		"kanbanArchive": {
+			"archive": "Archive",
+			"unarchive": "Unarchive"
 		},
 		"createSuccess": "The task was successfully created.",
 		"addReminder": "Add a reminder…",
