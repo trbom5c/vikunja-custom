@@ -585,16 +585,24 @@ if (Test-Path $bgFile) {
     }
 }
 
-# --- Fix registerServiceWorker.ts: disable SW registration ---
-# The upstream service worker (sw.js) fails evaluation when custom patches
-# alter the Vite chunk graph. Since we self-host behind Cloudflare, the SW
-# provides no benefit. Replace the file with a no-op to suppress the error toast.
+# --- Fix registerServiceWorker.ts: silence SW registration errors ---
+# The upstream sw.js may fail evaluation when custom patches alter the Vite
+# chunk graph. Replace console.error with console.warn so the global error
+# handler doesn't show it as a red toast to users.
 $swRegFile = Join-Path $SOURCE "frontend\src\registerServiceWorker.ts"
 if (Test-Path $swRegFile) {
-    $swContent = "// Service worker registration disabled for custom build`n// (upstream sw.js fails evaluation with patched chunk graph)`nexport {}`n"
-    Write-Utf8NoBom $swRegFile $swContent
-    Write-Host "  FIXED  registerServiceWorker.ts (disabled SW registration)" -ForegroundColor DarkGray
-    $fixCount++
+    $swContent = [System.IO.File]::ReadAllText($swRegFile)
+    if ($swContent -match 'console\.error\(.*Error during service worker') {
+        $swContent = $swContent.Replace(
+            "console.error('Error during service worker registration:', error)",
+            "console.warn('Service worker registration unavailable:', error.message || error)"
+        )
+        Write-Utf8NoBom $swRegFile $swContent
+        Write-Host "  FIXED  registerServiceWorker.ts (SW errors → console.warn)" -ForegroundColor DarkGray
+        $fixCount++
+    } else {
+        Write-Host "  OK     registerServiceWorker.ts" -ForegroundColor DarkGray
+    }
 }
 
 Write-Host ""
