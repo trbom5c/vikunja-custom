@@ -1030,9 +1030,12 @@ async function startImport() {
 				}
 
 				try {
+					// Pick a muted color for member-only labels (not already a Trello label)
+					const memberColors = ['#7c5cfc', '#49a3cc', '#5aac44', '#cd8133', '#c377e0', '#4bbf8b', '#e06c75']
+					const colorIdx = Array.from(memberLabelMap.values()).length % memberColors.length
 					const label = await labelService.create(new LabelModel({
 						title: labelTitle,
-						hexColor: '#b8b8b8', // neutral grey for member labels
+						hexColor: memberColors[colorIdx],
 					}))
 					memberLabelMap.set(memberId, label.id)
 					existingLabelsByTitle.set(labelTitle.toLowerCase(), label)
