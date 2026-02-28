@@ -438,7 +438,10 @@
 			"collapse": "Collapse this bucket",
 			"bucketLimitReached": "You have reached the bucket limit. Remove tasks or increase the limit to add new tasks.",
 			"hideDoneTasks": "Hide done tasks",
-			"relativeDates": "Relative dates"
+			"dateMode": {
+				"relative": "Relative dates",
+				"absolute": "Real dates"
+			}
 		},
 		"pseudo": {
 			"favorites": {

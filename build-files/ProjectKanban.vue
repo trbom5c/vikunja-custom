@@ -22,14 +22,14 @@
 					>
 					{{ $t('project.kanban.hideDoneTasks') }}
 				</label>
-				<label class="hide-done-toggle">
-					<input
-						type="checkbox"
-						:checked="kanbanDateMode === 'relative'"
-						@change="toggleDateMode"
-					>
-					{{ $t('project.kanban.relativeDates') }}
-				</label>
+				<select
+					class="date-mode-select"
+					:value="kanbanDateMode"
+					@change="setDateMode(($event.target as HTMLSelectElement).value)"
+				>
+					<option value="relative">{{ $t('project.kanban.dateMode.relative') }}</option>
+					<option value="date">{{ $t('project.kanban.dateMode.absolute') }}</option>
+				</select>
 				<XButton
 					v-if="canWrite"
 					variant="secondary"
@@ -254,6 +254,7 @@
 												:task="task"
 												:loading="taskUpdating[task.id] ?? false"
 												:project-id="projectId"
+												:date-mode="kanbanDateMode"
 												@taskCompletedRecurring="handleRecurringTaskCompletion"
 												@duplicateTask="openDuplicateTaskModal"
 												@saveAsTemplate="openSaveAsTemplateModal"
@@ -419,11 +420,11 @@ const userPrefs = useUserPreferences()
 const alwaysShowBucketTaskCount = computed(() => authStore.settings.frontendSettings.alwaysShowBucketTaskCount)
 
 // Kanban date display mode — synced via user preferences
-const kanbanDateMode = computed(() => userPrefs.get('kanban-date-mode', 'date'))
+// 'relative' = Vikunja default ("4 days ago"), 'date' = absolute ("Feb 23, 2026")
+const kanbanDateMode = computed(() => userPrefs.get('kanban-date-mode', 'relative'))
 
-function toggleDateMode() {
-	const newMode = kanbanDateMode.value === 'date' ? 'relative' : 'date'
-	userPrefs.set('kanban-date-mode', newMode)
+function setDateMode(mode: string) {
+	userPrefs.set('kanban-date-mode', mode)
 }
 const {handleTaskDropToProject} = useTaskDragToProject()
 const taskPositionService = ref(new TaskPositionService())
@@ -1099,6 +1100,26 @@ function unCollapseBucket(bucket: IBucket) {
 	input[type="checkbox"] {
 		cursor: pointer;
 		margin: 0;
+	}
+}
+
+.date-mode-select {
+	font-size: .85rem;
+	color: var(--grey-600);
+	background: transparent;
+	border: 1px solid var(--grey-300);
+	border-radius: $radius;
+	padding: .15rem .4rem;
+	margin-inline-start: .5rem;
+	cursor: pointer;
+	outline: none;
+
+	&:hover {
+		background: var(--grey-100);
+	}
+
+	&:focus {
+		border-color: var(--primary);
 	}
 }
 </style>

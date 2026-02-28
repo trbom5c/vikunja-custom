@@ -57,7 +57,7 @@
 					</span>
 				</span>
 				<div class="tw-flex tw-items-center tw-gap-1">
-					<!-- Due date display with mode toggle -->
+					<!-- Due date: mode='date' shows absolute, mode='relative' shows relative -->
 					<span
 						v-if="task.dueDate > 0"
 						v-tooltip="dateTooltip"
@@ -179,7 +179,6 @@ import {computed, ref, watch} from 'vue'
 import {useRouter} from 'vue-router'
 
 import {useGlobalNow} from '@/composables/useGlobalNow'
-import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import PriorityLabel from '@/components/tasks/partials/PriorityLabel.vue'
 import ProgressBar from '@/components/misc/ProgressBar.vue'
@@ -209,8 +208,10 @@ const props = withDefaults(defineProps<{
 	task: ITask,
 	projectId: IProject['id'],
 	loading?: boolean,
+	dateMode?: 'date' | 'relative',
 }>(), {
 	loading: false,
+	dateMode: 'relative',
 })
 
 const emit = defineEmits<{
@@ -221,7 +222,6 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const prefs = useUserPreferences()
 
 const loadingInternal = ref(false)
 
@@ -248,44 +248,51 @@ const isOverdue = computed(() => (
 	props.task.dueDate.getTime() <= now.value.getTime()
 ))
 
-// ── Date display mode ──
-// 'date' = show absolute date on card, hover shows relative
-// 'relative' = show relative ("3 days ago") on card, hover shows absolute
-const dateMode = computed(() => prefs.get('kanban-date-mode', 'date'))
+// ── Date display helpers ──
+// formatDisplayDate = relative ("4 days ago", "in a month") — Vikunja's default
+// formatDateLong    = absolute ("February 23, 2026")
+// formatDateSince   = relative from now ("4 days ago")
+//
+// dateMode prop:
+//   'date'     → show absolute on card, relative in tooltip
+//   'relative' → show relative on card (Vikunja default), absolute in tooltip
+
+function absoluteDate(d: Date): string {
+	return formatDateLong(d)
+}
+
+function relativeDate(d: Date): string {
+	return formatDateSince(d)
+}
 
 const dateDisplay = computed(() => {
 	if (!props.task.dueDate || props.task.dueDate.getTime() === 0) return ''
-	if (dateMode.value === 'relative') {
-		return formatDateSince(props.task.dueDate)
-	}
-	return formatDisplayDate(props.task.dueDate)
+	return props.dateMode === 'date'
+		? absoluteDate(props.task.dueDate)
+		: relativeDate(props.task.dueDate)
 })
 
 const dateTooltip = computed(() => {
 	if (!props.task.dueDate || props.task.dueDate.getTime() === 0) return ''
-	// Tooltip is always the inverse of the displayed value
-	if (dateMode.value === 'relative') {
-		return formatDateLong(props.task.dueDate)
-	}
-	return formatDateSince(props.task.dueDate)
+	// Tooltip is always the inverse
+	return props.dateMode === 'date'
+		? relativeDate(props.task.dueDate)
+		: absoluteDate(props.task.dueDate)
 })
 
-// ── Done-at display ──
+// ── Done-at display (same mode logic) ──
 const doneAtDisplay = computed(() => {
 	if (!props.task.doneAt) return ''
-	if (dateMode.value === 'relative') {
-		return formatDateSince(props.task.doneAt)
-	}
-	return formatDisplayDate(props.task.doneAt)
+	return props.dateMode === 'date'
+		? absoluteDate(props.task.doneAt)
+		: relativeDate(props.task.doneAt)
 })
 
 const doneAtTooltip = computed(() => {
 	if (!props.task.doneAt) return ''
-	// Tooltip is always the inverse of the displayed value
-	if (dateMode.value === 'relative') {
-		return formatDateLong(props.task.doneAt)
-	}
-	return formatDateSince(props.task.doneAt)
+	return props.dateMode === 'date'
+		? relativeDate(props.task.doneAt)
+		: absoluteDate(props.task.doneAt)
 })
 
 async function toggleTaskDone(task: ITask) {
