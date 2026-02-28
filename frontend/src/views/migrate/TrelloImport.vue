@@ -714,6 +714,8 @@ async function downloadAndUploadAttachment(
 	apiKey: string,
 	apiToken: string,
 ): Promise<any | null> {
+	const downloadUrl = `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}`
+
 	// Download from Trello via backend proxy (avoids CORS)
 	const proxyResp = await fetch('/api/v1/trello/proxy-download', {
 		method: 'POST',
@@ -722,15 +724,26 @@ async function downloadAndUploadAttachment(
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
-			url: `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}`,
+			url: downloadUrl,
 			key: apiKey,
 			token: apiToken,
 		}),
 	})
 
-	if (!proxyResp.ok) return null
+	if (!proxyResp.ok) {
+		const errText = await proxyResp.text().catch(() => '(no body)')
+		console.error(`[Attachment] Proxy download failed ${proxyResp.status}: ${errText}`)
+		console.error(`[Attachment] URL was: ${downloadUrl}`)
+		return null
+	}
 
 	const blob = await proxyResp.blob()
+	console.log(`[Attachment] Downloaded ${blob.size} bytes, type=${blob.type}`)
+	if (blob.size === 0) {
+		console.error('[Attachment] Empty blob returned from proxy')
+		return null
+	}
+
 	const fileName = attachment.name || attachment.fileName || 'attachment'
 
 	// Upload to Vikunja
@@ -746,9 +759,14 @@ async function downloadAndUploadAttachment(
 		body: formData,
 	})
 
-	if (!uploadResp.ok) return null
+	if (!uploadResp.ok) {
+		const errText = await uploadResp.text().catch(() => '(no body)')
+		console.error(`[Attachment] Vikunja upload failed ${uploadResp.status}: ${errText}`)
+		return null
+	}
 
 	const result = await uploadResp.json()
+	console.log('[Attachment] Upload result:', JSON.stringify(result))
 	// Vikunja returns { success: { id, ... } } or an array
 	if (result?.success) return result.success
 	return null
@@ -1334,6 +1352,9 @@ async function startImport() {
 									mimeType: att.mimeType || '',
 								})
 								importStats.value.attachments++
+								log('success', `  Uploaded attachment "${att.name}" (id=${vikunjaAtt.id})`)
+							} else {
+								log('error', `  Attachment "${att.name}" download/upload returned null — check browser console for details`)
 							}
 						} catch (attErr: any) {
 							log('error', `Attachment "${att.name}" failed for "${card.name}": ${attErr?.message || attErr}`)
