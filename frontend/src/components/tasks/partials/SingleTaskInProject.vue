@@ -19,7 +19,7 @@
 			/>
 
 			<ColorBubble
-				v-if="!showProjectSeparately && projectColor !== '' && currentProject?.id !== task.projectId"
+				v-if="!showProjectSeparately && !showProject && projectColor !== '' && currentProject?.id !== task.projectId"
 				:color="projectColor"
 				class="mie-1"
 			/>
@@ -30,7 +30,7 @@
 			>
 				<span class="is-inline-flex is-align-items-center">
 					<RouterLink
-						v-if="showProject && typeof project !== 'undefined'"
+						v-if="!showProject && typeof project !== 'undefined'"
 						v-tooltip="$t('task.detail.belongsToProject', {project: project.title})"
 						:to="{ name: 'project.index', params: { projectId: task.projectId } }"
 						class="task-project mie-1"
@@ -51,6 +51,14 @@
 						:done="task.done"
 						class="pis-2 mie-1"
 					/>
+
+					<span
+						v-if="task.autoTemplateId > 0"
+						v-tooltip="$t('task.autoTask.autoGenIndicator')"
+						class="auto-gen-indicator mie-1"
+					>
+						<icon icon="bolt" />
+					</span>
 
 					<TaskGlanceTooltip :task="task">
 						<RouterLink
@@ -141,19 +149,19 @@
 			/>
 
 			<ColorBubble
-				v-if="showProjectSeparately && projectColor !== '' && currentProject?.id !== task.projectId"
+				v-if="(showProjectSeparately || showProject) && projectColor !== '' && currentProject?.id !== task.projectId"
 				:color="projectColor"
 				class="mie-1"
 			/>
 
 			<RouterLink
-				v-if="showProjectSeparately"
-				v-tooltip="$t('task.detail.belongsToProject', {project: project.title})"
+				v-if="showProjectSeparately || (showProject && typeof project !== 'undefined')"
+				v-tooltip="$t('task.detail.belongsToProject', {project: project?.title})"
 				:to="{ name: 'project.index', params: { projectId: task.projectId } }"
 				class="task-project"
 				@click.stop
 			>
-				{{ project.title }}
+				{{ project?.title }}
 			</RouterLink>
 
 			<BaseButton
@@ -453,6 +461,14 @@ defineExpose({
 		color: var(--grey-400);
 		font-size: .9rem;
 		white-space: nowrap;
+	}
+
+	.auto-gen-indicator {
+		color: var(--warning);
+		font-size: .75rem;
+		opacity: 0.7;
+		display: inline-flex;
+		align-items: center;
 	}
 
 	.avatar {
