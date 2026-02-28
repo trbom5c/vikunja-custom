@@ -23,6 +23,13 @@ All notable changes to this custom Vikunja build.
 - Archived tasks remain in the project and are visible in List, Table, and Gantt views
 - Unarchive via card menu restores task visibility when filter is toggled off
 
+### Kanban Card Enhancements
+- **Label color swatches** — Trello-style colored bars at top of card, hover shows label name
+- **Date display mode** — "Relative dates" toggle in Kanban header switches between absolute ("Dec 8, 2025") and relative ("3 days ago"); hover always shows the inverse
+- **Done-at timestamp** — completed tasks show when they were marked done (green check + date/relative time)
+- **Done card styling** — completed tasks render at 65% opacity with strikethrough title
+- Date mode synced across devices via user preferences API (`kanban-date-mode`)
+
 ### Documentation
 - TrelloImport.vue and Migration.vue added to PATCH_MANIFEST.md
 - Updated file counts

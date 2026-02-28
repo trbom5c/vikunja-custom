@@ -6,6 +6,7 @@
 			'draggable': !(loadingInternal || loading),
 			'has-light-text': !colorIsDark(color),
 			'has-custom-background-color': color ?? undefined,
+			'is-done': task.done,
 		}"
 		:style="{'background-color': color ?? undefined}"
 		:data-task-id="task.id"
@@ -21,6 +22,19 @@
 			alt=""
 			class="tw-w-full"
 		>
+		<!-- Label color swatches (Trello-style bar) -->
+		<div
+			v-if="task.labels && task.labels.length > 0"
+			class="label-swatches"
+		>
+			<span
+				v-for="label in task.labels"
+				:key="label.id"
+				v-tooltip="label.title"
+				class="label-swatch"
+				:style="{ backgroundColor: label.hexColor || 'var(--grey-300)' }"
+			/>
+		</div>
 		<div class="p-2">
 			<div class="tw-flex tw-justify-between">
 				<span class="task-id">
@@ -43,9 +57,10 @@
 					</span>
 				</span>
 				<div class="tw-flex tw-items-center tw-gap-1">
+					<!-- Due date display with mode toggle -->
 					<span
 						v-if="task.dueDate > 0"
-						v-tooltip="formatDateLong(task.dueDate)"
+						v-tooltip="dateTooltip"
 						:class="{'overdue': isOverdue}"
 						class="due-date"
 					>
@@ -53,7 +68,7 @@
 							<Icon :icon="['far', 'calendar-alt']" />
 						</span>
 						<time :datetime="formatISO(task.dueDate)">
-							{{ formatDisplayDate(task.dueDate) }}
+							{{ dateDisplay }}
 						</time>
 					</span>
 					<Dropdown
@@ -97,6 +112,18 @@
 				class="project-title"
 			>
 				{{ projectTitle }}
+			</span>
+
+			<!-- Done-at timestamp for completed but visible tasks -->
+			<span
+				v-if="task.done && task.doneAt"
+				v-tooltip="doneAtTooltip"
+				class="done-at"
+			>
+				<span class="icon">
+					<Icon icon="check-circle" />
+				</span>
+				{{ doneAtDisplay }}
 			</span>
 
 			<ProgressBar
@@ -152,6 +179,7 @@ import {computed, ref, watch} from 'vue'
 import {useRouter} from 'vue-router'
 
 import {useGlobalNow} from '@/composables/useGlobalNow'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import PriorityLabel from '@/components/tasks/partials/PriorityLabel.vue'
 import ProgressBar from '@/components/misc/ProgressBar.vue'
@@ -168,7 +196,7 @@ import type {IProject} from '@/modelTypes/IProject'
 import {SUPPORTED_IMAGE_SUFFIX} from '@/models/attachment'
 import AttachmentService, {PREVIEW_SIZE} from '@/services/attachment'
 
-import {formatDateLong, formatDisplayDate, formatISO} from '@/helpers/time/formatDate'
+import {formatDateLong, formatDisplayDate, formatDateSince, formatISO} from '@/helpers/time/formatDate'
 import {colorIsDark} from '@/helpers/color/colorIsDark'
 import {useTaskStore} from '@/stores/tasks'
 import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
@@ -193,6 +221,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const prefs = useUserPreferences()
 
 const loadingInternal = ref(false)
 
@@ -218,6 +247,46 @@ const isOverdue = computed(() => (
 	props.task.dueDate.getTime() > 0 &&
 	props.task.dueDate.getTime() <= now.value.getTime()
 ))
+
+// ── Date display mode ──
+// 'date' = show absolute date on card, hover shows relative
+// 'relative' = show relative ("3 days ago") on card, hover shows absolute
+const dateMode = computed(() => prefs.get('kanban-date-mode', 'date'))
+
+const dateDisplay = computed(() => {
+	if (!props.task.dueDate || props.task.dueDate.getTime() === 0) return ''
+	if (dateMode.value === 'relative') {
+		return formatDateSince(props.task.dueDate)
+	}
+	return formatDisplayDate(props.task.dueDate)
+})
+
+const dateTooltip = computed(() => {
+	if (!props.task.dueDate || props.task.dueDate.getTime() === 0) return ''
+	// Tooltip is always the inverse of the displayed value
+	if (dateMode.value === 'relative') {
+		return formatDateLong(props.task.dueDate)
+	}
+	return formatDateSince(props.task.dueDate)
+})
+
+// ── Done-at display ──
+const doneAtDisplay = computed(() => {
+	if (!props.task.doneAt) return ''
+	if (dateMode.value === 'relative') {
+		return formatDateSince(props.task.doneAt)
+	}
+	return formatDisplayDate(props.task.doneAt)
+})
+
+const doneAtTooltip = computed(() => {
+	if (!props.task.doneAt) return ''
+	// Tooltip is always the inverse of the displayed value
+	if (dateMode.value === 'relative') {
+		return formatDateLong(props.task.doneAt)
+	}
+	return formatDateSince(props.task.doneAt)
+})
 
 async function toggleTaskDone(task: ITask) {
 	const isRecurringTask = task.repeatAfter.amount > 0 || task.repeatMode === TASK_REPEAT_MODES.REPEAT_MODE_MONTH
@@ -311,6 +380,15 @@ $task-background: var(--white);
 	border-radius: $radius;
 	background: $task-background;
 	overflow: hidden;
+
+	&.is-done {
+		opacity: .65;
+
+		h3 {
+			text-decoration: line-through;
+			color: var(--grey-400);
+		}
+	}
 
 	&.loader-container.is-loading::after {
 		inline-size: 1.5rem;
@@ -487,5 +565,39 @@ $task-background: var(--white);
 	color: var(--warning);
 	font-size: .75rem;
 	margin-inline-end: .25rem;
+}
+
+// ── Label color swatches (Trello-style) ──
+.label-swatches {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	padding: .35rem .5rem .15rem;
+}
+
+.label-swatch {
+	display: inline-block;
+	inline-size: 2rem;
+	block-size: .5rem;
+	border-radius: 3px;
+	flex-shrink: 0;
+}
+
+// ── Done-at timestamp ──
+.done-at {
+	display: flex;
+	align-items: center;
+	gap: .2rem;
+	font-size: .75rem;
+	color: var(--success);
+	margin-block-start: .15rem;
+
+	.icon {
+		font-size: .7rem;
+		block-size: auto;
+		inline-size: auto;
+		background: none !important;
+		padding: 0 !important;
+	}
 }
 </style>

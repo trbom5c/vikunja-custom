@@ -22,6 +22,14 @@
 					>
 					{{ $t('project.kanban.hideDoneTasks') }}
 				</label>
+				<label class="hide-done-toggle">
+					<input
+						type="checkbox"
+						:checked="kanbanDateMode === 'relative'"
+						@change="toggleDateMode"
+					>
+					{{ $t('project.kanban.relativeDates') }}
+				</label>
 				<XButton
 					v-if="canWrite"
 					variant="secondary"
@@ -348,6 +356,7 @@ import {useBaseStore} from '@/stores/base'
 import {useTaskStore} from '@/stores/tasks'
 import {useKanbanStore} from '@/stores/kanban'
 import {useAuthStore} from '@/stores/auth'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import ProjectWrapper from '@/components/project/ProjectWrapper.vue'
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
@@ -405,8 +414,17 @@ const kanbanStore = useKanbanStore()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
+const userPrefs = useUserPreferences()
 
 const alwaysShowBucketTaskCount = computed(() => authStore.settings.frontendSettings.alwaysShowBucketTaskCount)
+
+// Kanban date display mode — synced via user preferences
+const kanbanDateMode = computed(() => userPrefs.get('kanban-date-mode', 'date'))
+
+function toggleDateMode() {
+	const newMode = kanbanDateMode.value === 'date' ? 'relative' : 'date'
+	userPrefs.set('kanban-date-mode', newMode)
+}
 const {handleTaskDropToProject} = useTaskDragToProject()
 const taskPositionService = ref(new TaskPositionService())
 const taskBucketService = ref(new TaskBucketService())
