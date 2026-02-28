@@ -187,6 +187,8 @@ func (a *AutoTaskTemplate) Create(s *xorm.Session, auth web.Auth) error {
 
 // Update saves changes to an auto-task template.
 func (a *AutoTaskTemplate) Update(s *xorm.Session, _ web.Auth) error {
+	fmt.Printf("[AutoTask Update] ID=%d ProjectIDs=%v LabelIDs=%v Title=%q\n", a.ID, a.ProjectIDs, a.LabelIDs, a.Title)
+
 	// If the user changed the generate-at time, update next_due_at
 	// to preserve the new time-of-day while keeping the same date.
 	if a.NextDueAt != nil {
