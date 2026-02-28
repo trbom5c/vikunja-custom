@@ -42,6 +42,12 @@ func TriggerAutoTask(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid template ID")
 	}
 
+	// Optional: target a specific project from the template's list
+	var targetProjectID int64
+	if pidStr := c.QueryParam("project_id"); pidStr != "" {
+		targetProjectID, _ = strconv.ParseInt(pidStr, 10, 64)
+	}
+
 	auth, err := auth2.GetAuthFromClaims(c)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
@@ -54,7 +60,7 @@ func TriggerAutoTask(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not start transaction")
 	}
 
-	task, err := models.TriggerAutoTaskFromAuth(s, templateID, auth)
+	task, err := models.TriggerAutoTaskFromAuth(s, templateID, auth, targetProjectID)
 	if err != nil {
 		_ = s.Rollback()
 		if _, ok := err.(models.ErrAutoTaskTemplateNotFound); ok {

@@ -49,7 +49,7 @@
 							v-tooltip="$t('task.autoTask.sendNow')"
 							class="action-btn send-now-btn"
 							:disabled="!tmpl.active"
-							@click.stop="triggerNow(tmpl)"
+							@click.stop="openTriggerPicker(tmpl)"
 						>
 							<Icon icon="forward" />
 						</BaseButton>
@@ -69,6 +69,40 @@
 						</BaseButton>
 					</div>
 				</div>
+
+				<!-- Per-project trigger picker dropdown -->
+				<Transition name="fade">
+					<div
+						v-if="triggerPickerTemplateId === tmpl.id"
+						class="trigger-picker-dropdown"
+						@click.stop
+					>
+						<div class="trigger-picker-header">
+							<span class="trigger-picker-title">Send task to…</span>
+							<BaseButton class="trigger-picker-close" @click.stop="triggerPickerTemplateId = null">
+								<Icon icon="times" />
+							</BaseButton>
+						</div>
+						<div class="trigger-picker-options">
+							<button
+								class="trigger-picker-option"
+								@click.stop="triggerForProject(tmpl, 0)"
+							>
+								<Icon icon="layer-group" class="trigger-picker-icon" />
+								<span>All projects</span>
+							</button>
+							<button
+								v-for="pid in (tmpl.project_ids || [])"
+								:key="pid"
+								class="trigger-picker-option"
+								@click.stop="triggerForProject(tmpl, pid)"
+							>
+								<Icon icon="tasks" class="trigger-picker-icon" />
+								<span>{{ getProjectTitle(pid) }}</span>
+							</button>
+						</div>
+					</div>
+				</Transition>
 
 				<div class="card-meta">
 					<span class="meta-item">
@@ -601,6 +635,7 @@ const deletingTemplate = ref<IAutoTaskTemplate | null>(null)
 const editForm = ref<IAutoTaskTemplate>(emptyAutoTaskTemplate())
 const showLogModal = ref(false)
 const logTemplate = ref<IAutoTaskTemplate | null>(null)
+const triggerPickerTemplateId = ref<number | null>(null)
 
 // Typed v-model intermediaries for Vikunja components
 const selectedProjects = ref<IProject[]>([])
@@ -881,6 +916,32 @@ async function triggerNow(tmpl: IAutoTaskTemplate) {
 	}
 }
 
+function openTriggerPicker(tmpl: IAutoTaskTemplate) {
+	// If only one project (or none), trigger immediately — no picker needed
+	if (!tmpl.project_ids || tmpl.project_ids.length <= 1) {
+		triggerNow(tmpl)
+		return
+	}
+	// Toggle picker for this template
+	triggerPickerTemplateId.value =
+		triggerPickerTemplateId.value === tmpl.id ? null : tmpl.id!
+}
+
+async function triggerForProject(tmpl: IAutoTaskTemplate, projectId: number) {
+	triggerPickerTemplateId.value = null
+	try {
+		await triggerAutoTask(tmpl.id!, projectId || undefined)
+		const label = projectId ? getProjectTitle(projectId) : 'all projects'
+		success({message: `Task sent to ${label}`})
+		await loadTemplates()
+	} catch (e: any) {
+		const msg = e?.response?.data?.message || e?.message
+		if (msg) {
+			warning(msg)
+		}
+	}
+}
+
 function confirmDelete(tmpl: IAutoTaskTemplate) {
 	deletingTemplate.value = tmpl
 	showDeleteModal.value = true
@@ -987,6 +1048,88 @@ defineExpose({openCreate})
 
 .send-now-btn:hover {
 	color: var(--success);
+}
+
+.trigger-picker-dropdown {
+	background: var(--card-background, var(--grey-100));
+	border: 1px solid var(--grey-300);
+	border-radius: .5rem;
+	padding: .35rem;
+	margin-block: .25rem;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
+}
+
+.trigger-picker-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: .25rem .5rem;
+	margin-block-end: .25rem;
+}
+
+.trigger-picker-title {
+	font-size: .8rem;
+	font-weight: 600;
+	color: var(--grey-500);
+	text-transform: uppercase;
+	letter-spacing: .03em;
+}
+
+.trigger-picker-close {
+	color: var(--grey-400);
+	padding: .15rem;
+	font-size: .75rem;
+
+	&:hover {
+		color: var(--grey-600);
+	}
+}
+
+.trigger-picker-options {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+}
+
+.trigger-picker-option {
+	display: flex;
+	align-items: center;
+	gap: .5rem;
+	width: 100%;
+	padding: .45rem .65rem;
+	border: none;
+	border-radius: .35rem;
+	background: transparent;
+	color: var(--text);
+	font-size: .85rem;
+	cursor: pointer;
+	text-align: left;
+	transition: background 120ms ease;
+
+	&:hover {
+		background: color-mix(in srgb, var(--primary) 12%, transparent);
+		color: var(--primary);
+	}
+}
+
+.trigger-picker-icon {
+	font-size: .8rem;
+	width: 1.1rem;
+	color: var(--grey-400);
+}
+
+.trigger-picker-option:hover .trigger-picker-icon {
+	color: var(--primary);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+	transition: opacity 120ms ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+	opacity: 0;
 }
 
 .delete-btn:hover {

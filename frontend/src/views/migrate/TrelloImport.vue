@@ -767,8 +767,9 @@ async function downloadAndUploadAttachment(
 
 	const result = await uploadResp.json()
 	console.log('[Attachment] Upload result:', JSON.stringify(result))
-	// Vikunja returns { success: { id, ... } } or an array
-	if (result?.success) return result.success
+	// Vikunja returns { success: [{ id, ... }] }
+	if (result?.success?.length > 0) return result.success[0]
+	if (result?.success?.id) return result.success
 	return null
 }
 // Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When

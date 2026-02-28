@@ -125,7 +125,8 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 // TriggerAutoTask manually creates a task from an auto-task template immediately,
 // regardless of its schedule. Per-project duplicate checking is handled inside
 // createAutoTaskInstance — projects that already have an open task are skipped.
-func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, error) {
+// If targetProjectID > 0, only that project is used (must be in the template's list).
+func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User, targetProjectID int64) (*Task, error) {
 	tmpl := &AutoTaskTemplate{}
 	has, err := s.Where("id = ? AND owner_id = ?", templateID, u.ID).Get(tmpl)
 	if err != nil {
@@ -133,6 +134,21 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 	}
 	if !has {
 		return nil, ErrAutoTaskTemplateNotFound{ID: templateID}
+	}
+
+	// If a specific project was requested, temporarily narrow the template's project list
+	if targetProjectID > 0 {
+		found := false
+		for _, pid := range tmpl.ProjectIDs {
+			if pid == targetProjectID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("project %d is not in this template's target list", targetProjectID)
+		}
+		tmpl.ProjectIDs = []int64{targetProjectID}
 	}
 
 	return createAutoTaskInstance(s, tmpl, u, "manual")
@@ -289,9 +305,9 @@ func advanceFromTime(from time.Time, intervalValue int, intervalUnit string) tim
 }
 
 // TriggerAutoTaskFromAuth is a convenience wrapper that resolves the user from web.Auth.
-func TriggerAutoTaskFromAuth(s *xorm.Session, templateID int64, auth web.Auth) (*Task, error) {
+func TriggerAutoTaskFromAuth(s *xorm.Session, templateID int64, auth web.Auth, targetProjectID int64) (*Task, error) {
 	u := auth.(*user.User)
-	return TriggerAutoTask(s, templateID, u)
+	return TriggerAutoTask(s, templateID, u, targetProjectID)
 }
 
 // ResetAutoTaskSchedule recalculates next_due_at from NOW, ignoring history.
