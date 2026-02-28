@@ -56,26 +56,10 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 			continue
 		}
 
-		// Check: does an open (not done) task already exist for this template?
-		// If so, skip creation — the user needs to complete it first.
-		// But still advance next_due_at so the UI shows the next scheduled time.
-		openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
-		if err != nil {
-			return nil, err
-		}
-		if openCount > 0 {
-			// Advance next_due_at past now so display shows future schedule
-			nextDue := advanceFromTime(now, tmpl.IntervalValue, tmpl.IntervalUnit)
-			tmpl.NextDueAt = &nextDue
-			_, _ = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
-			continue
-		}
-
-		// No open task exists. Before creating a new one, check if a task was
-		// recently completed that we haven't processed yet (OnAutoTaskCompleted
-		// isn't hooked into the task update path). Find the most recently
-		// completed task for this template and advance next_due_at from its
-		// completion time.
+		// Before creating, check if a task was recently completed that we
+		// haven't processed yet (OnAutoTaskCompleted isn't hooked into the
+		// task update path). Find the most recently completed task for this
+		// template and advance next_due_at from its completion time.
 		type doneInfo struct {
 			ID     int64     `xorm:"'id'"`
 			DoneAt time.Time `xorm:"'done_at'"`
@@ -139,8 +123,10 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 }
 
 // TriggerAutoTask manually creates a task from an auto-task template immediately,
-// regardless of its schedule. Respects the "one open instance" rule.
-func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, error) {
+// regardless of its schedule. Per-project duplicate checking is handled inside
+// createAutoTaskInstance — projects that already have an open task are skipped.
+// If targetProjectID > 0, only that project is used (must be in the template's list).
+func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User, targetProjectID int64) (*Task, error) {
 	tmpl := &AutoTaskTemplate{}
 	has, err := s.Where("id = ? AND owner_id = ?", templateID, u.ID).Get(tmpl)
 	if err != nil {
@@ -150,13 +136,19 @@ func TriggerAutoTask(s *xorm.Session, templateID int64, u *user.User) (*Task, er
 		return nil, ErrAutoTaskTemplateNotFound{ID: templateID}
 	}
 
-	// Check for existing open instance
-	openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
-	if err != nil {
-		return nil, err
-	}
-	if openCount > 0 {
-		return nil, fmt.Errorf("an open task already exists for this template — complete it first")
+	// If a specific project was requested, temporarily narrow the template's project list
+	if targetProjectID > 0 {
+		found := false
+		for _, pid := range tmpl.ProjectIDs {
+			if pid == targetProjectID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("project %d is not in this template's target list", targetProjectID)
+		}
+		tmpl.ProjectIDs = []int64{targetProjectID}
 	}
 
 	return createAutoTaskInstance(s, tmpl, u, "manual")
@@ -223,6 +215,26 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 	var firstTask *Task
 
 	for _, projectID := range projectIDs {
+		// Verify the project still exists before attempting to create a task
+		exists, err := s.Where("id = ?", projectID).Exist(&Project{})
+		if err != nil {
+			return nil, fmt.Errorf("auto-task check project %d: %w", projectID, err)
+		}
+		if !exists {
+			log.Warningf("auto-task create failed for template %d in project %d: Project does not exist [ID: %d]", tmpl.ID, projectID, projectID)
+			continue
+		}
+
+		// Skip if an open (not done) task already exists for this template in this project
+		openInProject, err := s.Where("auto_template_id = ? AND project_id = ? AND done = ?", tmpl.ID, projectID, false).Count(&Task{})
+		if err != nil {
+			return nil, fmt.Errorf("auto-task open check project %d: %w", projectID, err)
+		}
+		if openInProject > 0 {
+			log.Debugf("auto-task template %d: skipping project %d — open task already exists", tmpl.ID, projectID)
+			continue
+		}
+
 		task := &Task{
 			Title:          tmpl.Title,
 			Description:    tmpl.Description,
@@ -233,7 +245,7 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 			AutoTemplateID: tmpl.ID,
 		}
 
-		err := createTask(s, task, u, false, true)
+		err = createTask(s, task, u, false, true)
 		if err != nil {
 			return nil, fmt.Errorf("auto-task create failed for template %d in project %d: %w", tmpl.ID, projectID, err)
 		}
@@ -293,9 +305,9 @@ func advanceFromTime(from time.Time, intervalValue int, intervalUnit string) tim
 }
 
 // TriggerAutoTaskFromAuth is a convenience wrapper that resolves the user from web.Auth.
-func TriggerAutoTaskFromAuth(s *xorm.Session, templateID int64, auth web.Auth) (*Task, error) {
+func TriggerAutoTaskFromAuth(s *xorm.Session, templateID int64, auth web.Auth, targetProjectID int64) (*Task, error) {
 	u := auth.(*user.User)
-	return TriggerAutoTask(s, templateID, u)
+	return TriggerAutoTask(s, templateID, u, targetProjectID)
 }
 
 // ResetAutoTaskSchedule recalculates next_due_at from NOW, ignoring history.

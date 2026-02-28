@@ -64,8 +64,9 @@ export async function deleteAutoTask(id: number): Promise<void> {
 	await http.delete(`/autotasks/${id}`)
 }
 
-export async function triggerAutoTask(id: number): Promise<any> {
-	const response = await http.post(`/autotasks/${id}/trigger`, {})
+export async function triggerAutoTask(id: number, projectId?: number): Promise<any> {
+	const params = projectId ? `?project_id=${projectId}` : ''
+	const response = await http.post(`/autotasks/${id}/trigger${params}`, {})
 	return response.data
 }
 

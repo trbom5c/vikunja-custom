@@ -39,6 +39,7 @@
 					<span class="stat"><strong>{{ openCards.length }}</strong> cards</span>
 					<span class="stat"><strong>{{ boardLabels.length }}</strong> labels</span>
 					<span class="stat"><strong>{{ boardChecklists.length }}</strong> checklists</span>
+					<span v-if="boardMembers.length" class="stat"><strong>{{ boardMembers.length }}</strong> members</span>
 				</div>
 			</div>
 
@@ -124,6 +125,14 @@
 						<span>Import comments</span>
 					</label>
 					<span class="option-desc">{{ boardCommentCount }} comments found</span>
+				</div>
+
+				<div v-if="boardMembers.length > 0" class="option-row">
+					<label class="option-label">
+						<input v-model="options.importMembers" type="checkbox">
+						<span>Import card members as labels + description note</span>
+					</label>
+					<span class="option-desc">{{ boardMembers.length }} members found — creates labels for assigned members</span>
 				</div>
 
 				<div class="option-row">
@@ -392,6 +401,7 @@ const options = ref({
 	importChecklists: true,
 	importLabels: true,
 	importComments: true,
+	importMembers: true,
 	markDueCompleteAsDone: true,
 })
 
@@ -472,6 +482,7 @@ const openLists = computed(() => (boardData.value?.lists || []).filter((l: any) 
 const openCards = computed(() => (boardData.value?.cards || []).filter((c: any) => !c.closed))
 const boardLabels = computed(() => (boardData.value?.labels || []).filter((l: any) => l.name))
 const boardChecklists = computed(() => boardData.value?.checklists || [])
+const boardMembers = computed(() => boardData.value?.members || [])
 const boardCommentCount = computed(() => {
 	const actions = boardData.value?.actions || []
 	return actions.filter((a: any) => a.type === 'commentCard').length
@@ -714,6 +725,8 @@ async function downloadAndUploadAttachment(
 	apiKey: string,
 	apiToken: string,
 ): Promise<any | null> {
+	const downloadUrl = `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}`
+
 	// Download from Trello via backend proxy (avoids CORS)
 	const proxyResp = await fetch('/api/v1/trello/proxy-download', {
 		method: 'POST',
@@ -722,15 +735,26 @@ async function downloadAndUploadAttachment(
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
-			url: `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}`,
+			url: downloadUrl,
 			key: apiKey,
 			token: apiToken,
 		}),
 	})
 
-	if (!proxyResp.ok) return null
+	if (!proxyResp.ok) {
+		const errText = await proxyResp.text().catch(() => '(no body)')
+		console.error(`[Attachment] Proxy download failed ${proxyResp.status}: ${errText}`)
+		console.error(`[Attachment] URL was: ${downloadUrl}`)
+		return null
+	}
 
 	const blob = await proxyResp.blob()
+	console.log(`[Attachment] Downloaded ${blob.size} bytes, type=${blob.type}`)
+	if (blob.size === 0) {
+		console.error('[Attachment] Empty blob returned from proxy')
+		return null
+	}
+
 	const fileName = attachment.name || attachment.fileName || 'attachment'
 
 	// Upload to Vikunja
@@ -746,11 +770,17 @@ async function downloadAndUploadAttachment(
 		body: formData,
 	})
 
-	if (!uploadResp.ok) return null
+	if (!uploadResp.ok) {
+		const errText = await uploadResp.text().catch(() => '(no body)')
+		console.error(`[Attachment] Vikunja upload failed ${uploadResp.status}: ${errText}`)
+		return null
+	}
 
 	const result = await uploadResp.json()
-	// Vikunja returns { success: { id, ... } } or an array
-	if (result?.success) return result.success
+	console.log('[Attachment] Upload result:', JSON.stringify(result))
+	// Vikunja returns { success: [{ id, ... }] }
+	if (result?.success?.length > 0) return result.success[0]
+	if (result?.success?.id) return result.success
 	return null
 }
 // Vikunja 1.0+ stores buckets per-VIEW, not per-project.  When
@@ -935,6 +965,91 @@ async function startImport() {
 					} catch {
 						log('error', `Failed to create label "${trelloLabel.name}": ${e?.message || e}`)
 						importStats.value.errors++
+					}
+				}
+			}
+		}
+
+		// ─────────────────────────────────────────────────────
+		// PHASE 2b: Create member labels
+		// Build a map of Trello member ID → Vikunja label ID.
+		// Only creates labels for members actually assigned to
+		// cards in the selected lists.  Collision avoidance:
+		// reuse existing labels by exact title match.
+		// ─────────────────────────────────────────────────────
+		const memberLabelMap = new Map<string, number>()
+		const memberNameMap = new Map<string, string>()  // memberId → display name
+		if (options.value.importMembers && boardMembers.value.length > 0) {
+			// Build name lookup
+			for (const m of boardMembers.value) {
+				memberNameMap.set(m.id, m.fullName || m.username || m.id)
+			}
+
+			// Find which members are actually used on selected cards
+			const usedMemberIds = new Set<string>()
+			const cards = board.cards || []
+			for (const card of cards) {
+				if (!selectedListIds.value.has(card.idList)) continue
+				if (!options.value.importArchived && card.closed) continue
+				for (const mid of (card.idMembers || [])) {
+					usedMemberIds.add(mid)
+				}
+			}
+
+			// Pre-fetch all existing labels once for collision check
+			let existingLabels: any[] = []
+			try {
+				existingLabels = await labelService.getAll({}, {s: ''})
+			} catch {
+				// If fetch fails, we'll just create and handle duplicates
+			}
+			const existingLabelsByTitle = new Map<string, any>()
+			for (const l of existingLabels) {
+				existingLabelsByTitle.set(l.title.toLowerCase(), l)
+			}
+
+			// Also include labels we just created in this import
+			for (const [trelloId, vikunjaId] of labelMap) {
+				const trelloLabel = boardLabels.value.find((l: any) => l.id === trelloId)
+				if (trelloLabel) {
+					existingLabelsByTitle.set(trelloLabel.name.toLowerCase(), { id: vikunjaId, title: trelloLabel.name })
+				}
+			}
+
+			for (const memberId of usedMemberIds) {
+				const name = memberNameMap.get(memberId) || memberId
+				const labelTitle = name
+				updateProgress(`Creating member label "${labelTitle}"...`)
+
+				// Check collision: exact match (case-insensitive)
+				const existing = existingLabelsByTitle.get(labelTitle.toLowerCase())
+				if (existing) {
+					memberLabelMap.set(memberId, existing.id)
+					log('info', `Member label "${labelTitle}" already exists (id=${existing.id}), reusing`)
+					continue
+				}
+
+				try {
+					const label = await labelService.create(new LabelModel({
+						title: labelTitle,
+						hexColor: '#b8b8b8',
+					}))
+					memberLabelMap.set(memberId, label.id)
+					existingLabelsByTitle.set(labelTitle.toLowerCase(), label)
+					log('success', `Member label: ${labelTitle}`)
+				} catch (e: any) {
+					// Last resort: search by name
+					try {
+						const results = await labelService.getAll({}, {s: labelTitle})
+						const match = results.find((l: any) => l.title.toLowerCase() === labelTitle.toLowerCase())
+						if (match) {
+							memberLabelMap.set(memberId, match.id)
+							log('info', `Member label "${labelTitle}" found via search, reusing`)
+						} else {
+							log('error', `Failed to create member label "${labelTitle}": ${e?.message || e}`)
+						}
+					} catch {
+						log('error', `Failed to create member label "${labelTitle}": ${e?.message || e}`)
 					}
 				}
 			}
@@ -1181,6 +1296,16 @@ async function startImport() {
 					done: false,
 				}
 
+				// ── Card cover color ──
+				// Trello cards can have a solid color cover (no attachment).
+				// Map it to Vikunja's hex_color for the task.
+				if (card.cover?.color && !card.cover?.idAttachment) {
+					const coverHex = trelloColorToHex(card.cover.color)
+					if (coverHex) {
+						payload.hex_color = coverHex
+					}
+				}
+
 				// ── Date mapping ──
 				// Trello card.due and card.start are ISO 8601 strings
 				// like "2025-10-28T00:00:00.000Z".  We convert to Date
@@ -1283,6 +1408,48 @@ async function startImport() {
 					}
 				}
 
+				// ── Assign member labels + description note ──
+				if (options.value.importMembers && card.idMembers?.length > 0) {
+					const memberNames: string[] = []
+					for (const memberId of card.idMembers) {
+						const name = memberNameMap.get(memberId)
+						if (name) memberNames.push(name)
+
+						const vikunjaLabelId = memberLabelMap.get(memberId)
+						if (vikunjaLabelId) {
+							try {
+								await labelTaskService.create(new LabelTask({
+									taskId: task.id,
+									labelId: vikunjaLabelId,
+								}))
+							} catch {
+								// duplicate label assignment, ignore
+							}
+						}
+					}
+
+					// Append assignee note to description
+					if (memberNames.length > 0) {
+						const currentDesc = task.description || ''
+						const assigneeNote = `\n\n> **Trello assignees:** ${memberNames.join(', ')}`
+						const newDesc = currentDesc + assigneeNote
+						try {
+							const token = getAuthToken()
+							await fetch(`/api/v1/tasks/${task.id}`, {
+								method: 'POST',
+								headers: {
+									'Authorization': 'Bearer ' + token,
+									'Content-Type': 'application/json',
+								},
+								body: JSON.stringify({ description: newDesc.trim() }),
+							})
+							task.description = newDesc.trim()
+						} catch {
+							// Not critical
+						}
+					}
+				}
+
 				// ── Import comments ──
 				// Trello stores comments in board.actions with type 'commentCard'
 				if (options.value.importComments && task.id) {
@@ -1306,10 +1473,22 @@ async function startImport() {
 				// attachment from Trello and upload it to Vikunja. Then update
 				// the task description to embed images and link files.
 				if (hasTrelloApi.value && trelloApiValid.value && task.id && card.attachments?.length > 0) {
-					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string}> = []
+					log('info', `Card "${card.name}" has ${card.attachments.length} attachment(s)`)
+					const uploadedAtts: Array<{name: string, vikunjaId: number, mimeType: string, trelloAttId: string}> = []
 					for (const att of card.attachments) {
-						// Only download actual uploads, not linked URLs
-						if (!att.isUpload) continue
+						// Only download actual uploads, not linked URLs.
+						// The JSON export may not include isUpload, so we also
+						// check if the URL points to Trello's attachment hosting.
+						const isTrelloHosted = att.url && (
+							att.url.startsWith('https://trello.com/1/cards/') ||
+							att.url.startsWith('https://trello-attachments.s3.') ||
+							att.url.startsWith('https://trello.com/1/') ||
+							att.url.includes('trello-backgrounds') ||
+							att.url.includes('trello-attachments')
+						)
+						const isUpload = att.isUpload === true || (att.isUpload === undefined && isTrelloHosted)
+						log('info', `  Attachment "${att.name}": isUpload=${att.isUpload}, isTrelloHosted=${isTrelloHosted}, willDownload=${isUpload}, url=${att.url?.substring(0, 80)}`)
+						if (!isUpload) continue
 						try {
 							const vikunjaAtt = await downloadAndUploadAttachment(
 								card.id, att, task.id,
@@ -1320,8 +1499,12 @@ async function startImport() {
 									name: att.name || att.fileName || 'file',
 									vikunjaId: vikunjaAtt.id,
 									mimeType: att.mimeType || '',
+									trelloAttId: att.id || '',
 								})
 								importStats.value.attachments++
+								log('success', `  Uploaded attachment "${att.name}" (id=${vikunjaAtt.id})`)
+							} else {
+								log('error', `  Attachment "${att.name}" download/upload returned null — check browser console for details`)
 							}
 						} catch (attErr: any) {
 							log('error', `Attachment "${att.name}" failed for "${card.name}": ${attErr?.message || attErr}`)
@@ -1359,6 +1542,28 @@ async function startImport() {
 							})
 						} catch {
 							// Description update failed, attachments still exist on task
+						}
+
+						// Set cover image if the Trello card had one
+						const coverId = card.idAttachmentCover || card.cover?.idAttachment
+						if (coverId) {
+							const coverAtt = uploadedAtts.find(ua => ua.trelloAttId === coverId)
+							if (coverAtt) {
+								try {
+									const token = getAuthToken()
+									await fetch(`/api/v1/tasks/${task.id}`, {
+										method: 'POST',
+										headers: {
+											'Authorization': 'Bearer ' + token,
+											'Content-Type': 'application/json',
+										},
+										body: JSON.stringify({ cover_image_attachment_id: coverAtt.vikunjaId }),
+									})
+									log('info', `  Set cover image for "${card.name}" (attachment ${coverAtt.vikunjaId})`)
+								} catch {
+									// Cover update failed, not critical
+								}
+							}
 						}
 					}
 				}
@@ -1578,17 +1783,18 @@ async function startImport() {
 	gap: 0.5rem;
 	padding: 0.6rem 0.8rem;
 	border-radius: 8px;
-	background: var(--grey-100);
+	background: var(--card-background, var(--grey-100));
+	border: 1px solid transparent;
 	cursor: pointer;
 	transition: all 150ms ease;
 
 	&:hover {
-		background: var(--grey-200);
+		border-color: var(--grey-300);
 	}
 
 	&.is-selected {
-		background: var(--primary-light);
-		border: 1px solid var(--primary);
+		background: color-mix(in srgb, var(--primary) 12%, var(--card-background, var(--grey-100)));
+		border-color: var(--primary);
 	}
 
 	&.is-closed {
@@ -1795,27 +2001,32 @@ async function startImport() {
 	display: flex;
 	gap: 0.75rem;
 	margin-block-start: 1.5rem;
+	padding-block-end: 3rem;
 }
 
 .trello-api-section {
-	margin-block-start: 1rem;
-	border-top: 1px solid var(--grey-200);
+	margin-block-start: 1.25rem;
 	padding-block-start: 1rem;
 }
 
 .trello-api-toggle {
-	background: none;
-	border: none;
-	color: var(--grey-500);
+	background: var(--grey-100);
+	border: 1px dashed var(--primary);
+	border-radius: .5rem;
+	color: var(--primary);
 	cursor: pointer;
 	font-size: .95rem;
+	font-weight: 500;
 	display: flex;
 	align-items: center;
-	gap: .4rem;
-	padding: .25rem 0;
+	gap: .5rem;
+	padding: .5rem .85rem;
+	width: 100%;
+	transition: background .15s, border-color .15s;
 
 	&:hover {
-		color: var(--primary);
+		background: color-mix(in srgb, var(--primary) 8%, transparent);
+		border-style: solid;
 	}
 }
 
@@ -1826,11 +2037,13 @@ async function startImport() {
 	background: var(--success);
 	color: #fff;
 	font-weight: 600;
+	margin-inline-start: auto;
 
 	&.is-optional {
-		background: var(--grey-300);
-		color: var(--grey-600);
-		font-weight: 400;
+		background: color-mix(in srgb, var(--primary) 15%, transparent);
+		color: var(--primary);
+		font-weight: 500;
+		border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
 	}
 }
 

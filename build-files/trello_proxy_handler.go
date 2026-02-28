@@ -27,8 +27,15 @@ import (
 
 // TrelloProxyDownload proxies a download request to the Trello API,
 // avoiding CORS issues when the browser fetches Trello attachments.
-// The frontend sends the Trello URL + credentials and this endpoint
-// streams the file back.
+//
+// Trello requires the Authorization header (not query params) for
+// attachment downloads since the "Authenticated Access to S3" change.
+// See: https://community.developer.atlassian.com/t/update-authenticated-access-to-s3/43681
+//
+// Equivalent curl:
+//
+//	curl -H 'Authorization: OAuth oauth_consumer_key="KEY", oauth_token="TOKEN"' \
+//	  https://api.trello.com/1/cards/{cardId}/attachments/{attachmentId}/download/{filename}
 //
 // POST /api/v1/trello/proxy-download
 // Body: { "url": "https://api.trello.com/1/cards/.../download/file.jpg", "key": "...", "token": "..." }
@@ -52,15 +59,18 @@ func TrelloProxyDownload(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "url must be a Trello card attachment URL")
 	}
 
-	// Append auth to the Trello URL
-	separator := "?"
-	if strings.Contains(req.URL, "?") {
-		separator = "&"
+	// Build the request with OAuth Authorization header (required since S3 auth change)
+	httpReq, err := http.NewRequest("GET", req.URL, nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid URL: %v", err))
 	}
-	trelloURL := fmt.Sprintf("%s%skey=%s&token=%s", req.URL, separator, req.Key, req.Token)
+	httpReq.Header.Set("Authorization",
+		fmt.Sprintf(`OAuth oauth_consumer_key="%s", oauth_token="%s"`, req.Key, req.Token),
+	)
 
-	// Fetch from Trello
-	resp, err := http.Get(trelloURL) // nolint:gosec
+	// Execute the request
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch from Trello: %v", err))
 	}
@@ -77,7 +87,6 @@ func TrelloProxyDownload(c *echo.Context) error {
 		contentType = "application/octet-stream"
 	}
 
-	// Set additional headers before streaming
 	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
 		c.Response().Header().Set("Content-Disposition", cd)
 	}
