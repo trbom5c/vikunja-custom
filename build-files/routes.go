@@ -389,6 +389,9 @@ func registerAPIRoutes(a *echo.Group) {
 	u.GET("/settings/token/caldav", apiv1.GetCaldavTokens)
 	u.DELETE("/settings/token/caldav/:id", apiv1.DeleteCaldavToken)
 
+	// Trello import proxy (avoids CORS for attachment downloads)
+	u.POST("/trello/proxy-download", apiv1.TrelloProxyDownload)
+
 	sessionProvider := &handler.WebHandler{
 		EmptyStruct: func() handler.CObject {
 			return &models.Session{}

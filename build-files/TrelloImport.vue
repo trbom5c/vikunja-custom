@@ -714,13 +714,23 @@ async function downloadAndUploadAttachment(
 	apiKey: string,
 	apiToken: string,
 ): Promise<any | null> {
-	// Download from Trello API (requires auth in query params for download endpoint)
-	const downloadUrl = `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}?key=${apiKey}&token=${apiToken}`
+	// Download from Trello via backend proxy (avoids CORS)
+	const proxyResp = await fetch('/api/v1/trello/proxy-download', {
+		method: 'POST',
+		headers: {
+			'Authorization': 'Bearer ' + getAuthToken(),
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({
+			url: `https://api.trello.com/1/cards/${trelloCardId}/attachments/${attachment.id}/download/${encodeURIComponent(attachment.name || 'file')}`,
+			key: apiKey,
+			token: apiToken,
+		}),
+	})
 
-	const dlResp = await fetch(downloadUrl)
-	if (!dlResp.ok) return null
+	if (!proxyResp.ok) return null
 
-	const blob = await dlResp.blob()
+	const blob = await proxyResp.blob()
 	const fileName = attachment.name || attachment.fileName || 'attachment'
 
 	// Upload to Vikunja

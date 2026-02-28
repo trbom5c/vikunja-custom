@@ -764,12 +764,19 @@ function openCreate() {
 	showEditModal.value = true
 }
 
-function editTemplate(tmpl: IAutoTaskTemplate) {
+async function editTemplate(tmpl: IAutoTaskTemplate) {
 	editingTemplate.value = tmpl
 	editForm.value = {...tmpl}
 
 	// Load project objects from store
 	const ids = tmpl.project_ids || []
+	if (ids.length > 0) {
+		// Ensure projects are loaded in the store
+		const missing = ids.filter(id => !projectStore.projects[id])
+		if (missing.length > 0) {
+			await projectStore.loadAllProjects()
+		}
+	}
 	selectedProjects.value = ids
 		.map(id => projectStore.projects[id])
 		.filter(Boolean) as IProject[]

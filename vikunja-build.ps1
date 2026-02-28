@@ -389,6 +389,7 @@ $fileMap = @{
     "chain_step_attachment.go"   = "pkg\routes\api\v1\chain_step_attachment.go"
     "auto_task_handler.go"       = "pkg\routes\api\v1\auto_task_handler.go"
     "user_preferences_handler.go" = "pkg\routes\api\v1\user_preferences_handler.go"
+    "trello_proxy_handler.go"    = "pkg\routes\api\v1\trello_proxy_handler.go"
     # Backend - Migrations
     "20260223120000.go"          = "pkg\migration\20260223120000.go"
     "20260224040000.go"          = "pkg\migration\20260224040000.go"
