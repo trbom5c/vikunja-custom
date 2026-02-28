@@ -1,14 +1,16 @@
 <template>
 	<div
 		v-cy="'showTasks'"
-		class="is-max-width-desktop has-text-start"
+		class="content-widescreen"
 	>
-		<h3 class="mbe-2 title">
-			{{ pageTitle }}
-		</h3>
+		<h2>{{ pageTitle }}</h2>
+		<p class="has-text-grey">
+			{{ $t('task.show.pageDescription') }}
+		</p>
+
 		<Message
 			v-if="filteredLabels.length > 0"
-			class="label-filter-info mbe-2"
+			class="label-filter-info"
 		>
 			<i18n-t
 				keypath="task.show.filterByLabel"
@@ -31,47 +33,61 @@
 				<Icon icon="times" />
 			</BaseButton>
 		</Message>
-		<p
-			v-if="!showAll"
-			class="show-tasks-options"
-		>
-			<DatepickerWithRange @update:modelValue="setDate">
+
+		<hr class="page-separator">
+
+		<div class="options-bar">
+			<DatepickerWithRange
+				v-if="!showAll"
+				@update:modelValue="setDate"
+			>
 				<template #trigger="{toggle}">
 					<XButton
 						variant="primary"
 						:shadow="false"
-						class="mbe-2"
 						@click.prevent.stop="toggle()"
 					>
 						{{ $t('task.show.select') }}
 					</XButton>
 				</template>
 			</DatepickerWithRange>
-			<FancyCheckbox
-				:model-value="showNulls"
-				class="mie-2"
-				@update:modelValue="setShowNulls"
-			>
-				{{ $t('task.show.noDates') }}
-			</FancyCheckbox>
-			<FancyCheckbox
-				:model-value="showOverdue"
-				@update:modelValue="setShowOverdue"
-			>
-				{{ $t('task.show.overdue') }}
-			</FancyCheckbox>
-		</p>
+			<div class="options-checks">
+				<FancyCheckbox
+					v-if="!showAll"
+					:model-value="effectiveShowNulls"
+					@update:modelValue="setShowNulls"
+				>
+					{{ $t('task.show.noDates') }}
+				</FancyCheckbox>
+				<FancyCheckbox
+					v-if="!showAll"
+					:model-value="effectiveShowOverdue"
+					@update:modelValue="setShowOverdue"
+				>
+					{{ $t('task.show.overdue') }}
+				</FancyCheckbox>
+				<FancyCheckbox
+					:model-value="effectiveAssignedToMe"
+					@update:modelValue="setAssignedToMe"
+				>
+					{{ $t('task.show.assignedToMe') }}
+				</FancyCheckbox>
+			</div>
+		</div>
+
 		<template v-if="!loading && (!tasks || tasks.length === 0) && showNothingToDo">
-			<h3 class="has-text-centered mbs-6">
-				{{ $t('task.show.noTasks') }}
-			</h3>
-			<LlamaCool class="llama-cool" />
+			<div class="has-text-centered p-4">
+				<h3 class="has-text-grey">
+					{{ $t('task.show.noTasks') }}
+				</h3>
+				<LlamaCool class="llama-cool" />
+			</div>
 		</template>
 
 		<Card
 			v-if="hasTasks"
 			:padding="false"
-			class="has-overflow"
+			class="has-overflow task-card"
 			:has-content="false"
 			:loading="loading"
 		>
@@ -86,10 +102,11 @@
 			</div>
 		</Card>
 		<div
-			v-else
-			:class="{ 'is-loading': loading}"
-			class="spinner"
-		/>
+			v-else-if="loading"
+			class="has-text-centered p-4"
+		>
+			<span class="loader is-loading" />
+		</div>
 	</div>
 </template>
 
@@ -117,6 +134,7 @@ import {useProjectStore} from '@/stores/projects'
 import {useLabelStore} from '@/stores/labels'
 import type {TaskFilterParams} from '@/services/taskCollection'
 import TaskCollectionService from '@/services/taskCollection'
+import {useStorage} from '@vueuse/core'
 
 const props = withDefaults(defineProps<{
 	dateFrom?: Date | string,
@@ -149,6 +167,46 @@ const {t} = useI18n({useScope: 'global'})
 const tasks = ref<ITask[]>([])
 const showNothingToDo = ref<boolean>(false)
 const taskCollectionService = ref(new TaskCollectionService())
+
+// Persist checkbox state so it survives navigation away and back
+// Home page defaults: show everything (both true)
+// Upcoming page defaults: show tasks without date, hide overdue (matches original Vikunja)
+const storedShowNulls = useStorage('upcomingShowNulls', false)
+const storedShowOverdue = useStorage('upcomingShowOverdue', false)
+const storedHomeShowNulls = useStorage('homeShowNulls', true)
+const storedHomeShowOverdue = useStorage('homeShowOverdue', true)
+const storedAssignedToMe = useStorage('upcomingAssignedToMe', false)
+
+// Effective values: use prop (from query param) if explicitly set, otherwise use stored
+// Home and Upcoming have separate storage with different defaults
+const effectiveShowNulls = computed(() => {
+	if (route.query.showNulls !== undefined) {
+		const val = props.showNulls
+		if (showAll.value) storedHomeShowNulls.value = val
+		else storedShowNulls.value = val
+		return val
+	}
+	return showAll.value ? storedHomeShowNulls.value : storedShowNulls.value
+})
+
+const effectiveShowOverdue = computed(() => {
+	if (route.query.showOverdue !== undefined) {
+		const val = props.showOverdue
+		if (showAll.value) storedHomeShowOverdue.value = val
+		else storedShowOverdue.value = val
+		return val
+	}
+	return showAll.value ? storedHomeShowOverdue.value : storedShowOverdue.value
+})
+
+const effectiveAssignedToMe = computed(() => {
+	if (route.query.assignedToMe !== undefined) {
+		const val = route.query.assignedToMe === 'true'
+		storedAssignedToMe.value = val
+		return val
+	}
+	return storedAssignedToMe.value
+})
 
 setTimeout(() => showNothingToDo.value = true, 100)
 
@@ -195,13 +253,16 @@ function setDate(dates: dateStrings) {
 		query: {
 			from: dates.dateFrom ?? props.dateFrom,
 			to: dates.dateTo ?? props.dateTo,
-			showOverdue: props.showOverdue ? 'true' : 'false',
-			showNulls: props.showNulls ? 'true' : 'false',
+			showOverdue: effectiveShowOverdue.value ? 'true' : 'false',
+			showNulls: effectiveShowNulls.value ? 'true' : 'false',
+			assignedToMe: effectiveAssignedToMe.value ? 'true' : 'false',
 		},
 	})
 }
 
 function setShowOverdue(show: boolean) {
+	if (showAll.value) storedHomeShowOverdue.value = show
+	else storedShowOverdue.value = show
 	router.push({
 		name: route.name as string,
 		query: {
@@ -212,11 +273,24 @@ function setShowOverdue(show: boolean) {
 }
 
 function setShowNulls(show: boolean) {
+	if (showAll.value) storedHomeShowNulls.value = show
+	else storedShowNulls.value = show
 	router.push({
 		name: route.name as string,
 		query: {
 			...route.query,
 			showNulls: show ? 'true' : 'false',
+		},
+	})
+}
+
+function setAssignedToMe(show: boolean) {
+	storedAssignedToMe.value = show
+	router.push({
+		name: route.name as string,
+		query: {
+			...route.query,
+			assignedToMe: show ? 'true' : 'false',
 		},
 	})
 }
@@ -234,26 +308,31 @@ async function loadPendingTasks(from: Date|string, to: Date|string, filterId: nu
 		return
 	}
 
+	// NEVER use filter_include_nulls — it adds "OR field IS NULL" to EVERY condition
+	// including "done = false", making all tasks leak through. We fetch all incomplete
+	// tasks and apply date/null filtering client-side.
+
 	const params: TaskFilterParams = {
 		sort_by: ['due_date', 'id'],
 		order_by: ['asc', 'desc'],
 		filter: 'done = false',
-		filter_include_nulls: props.showNulls,
+		filter_include_nulls: false,
 		s: '',
 		expand: ['comment_count', 'is_unread'],
 	}
 
 	if (!showAll.value) {
+		// Upcoming page: use server-side date filter for the basic range,
+		// but handle "show tasks without date" and "show overdue" client-side
+		// because filter_include_nulls breaks the done=false condition.
 
-		params.filter += ` && due_date < '${to instanceof Date ? to.toISOString() : to}'`
-
-		// NOTE: Ideally we could also show tasks with a start or end date in the specified range, but the api
-		//       is not capable (yet) of combining multiple filters with 'and' and 'or'.
-
-		if (!props.showOverdue) {
-			params.filter += ` && due_date > '${from instanceof Date ? from.toISOString() : from}'`
-		}
+		// We fetch a broad set: all incomplete tasks up to the end date,
+		// plus overdue tasks if that toggle is on. No-date tasks are always
+		// fetched (we can't exclude them server-side without filter_include_nulls).
+		// Client-side we then apply the precise filtering.
 	}
+	// Home page (showAll): no date filters, just done = false.
+	// "Assigned to me" is the primary useful filter here.
 
 	// Add label filtering
 	if (props.labelIds && props.labelIds.length > 0) {
@@ -261,12 +340,59 @@ async function loadPendingTasks(from: Date|string, to: Date|string, filterId: nu
 		params.filter += params.filter ? ` && ${labelFilter}` : labelFilter
 	}
 
+	// Add "assigned to me" filtering — done client-side below
+	// (server-side assignees filter is unreliable with some Vikunja versions)
+
 	let projectId = null
 	if (showAll.value && filterId && typeof projectStore.projects[filterId] !== 'undefined') {
 		projectId = filterId
 	}
 
 	tasks.value = await taskStore.loadTasks(params, projectId)
+
+	// Client-side date filtering.
+	// We can't use filter_include_nulls (it adds OR IS NULL to EVERY condition
+	// including done=false, making all tasks leak through). So we fetch all
+	// incomplete tasks and filter dates client-side.
+	if (!showAll.value) {
+		// Upcoming page: filter by date range + overdue/no-date toggles
+		const dateFrom = from instanceof Date ? from : new Date(from as string)
+		const dateTo = to instanceof Date ? to : new Date(to as string)
+
+		tasks.value = tasks.value.filter((task: ITask) => {
+			const due = task.dueDate ? new Date(task.dueDate) : null
+			const isZero = due && due.getFullYear() < 2
+
+			// Task has no due date (null or zero time)
+			if (!due || isZero) {
+				return effectiveShowNulls.value
+			}
+
+			// Task is overdue (due before range start)
+			if (due < dateFrom) {
+				return effectiveShowOverdue.value
+			}
+
+			// Task is within the date range
+			return due < dateTo
+		})
+	} else {
+		// Home page: no date filtering — show all incomplete tasks.
+		// Only "Assigned to me" applies (handled below).
+	}
+
+	// Client-side "Assigned to me" filtering
+	if (effectiveAssignedToMe.value) {
+		const currentUserId = authStore.info?.id
+		if (currentUserId) {
+			tasks.value = tasks.value.filter((task: ITask) => {
+				return task.assignees && task.assignees.some(
+					(a: any) => a.id === currentUserId,
+				)
+			})
+		}
+	}
+
 	emit('tasksLoaded', true)
 }
 
@@ -292,7 +418,7 @@ function updateTasks(updatedTask: ITask) {
 // hasn't changed. Using watch with explicit dependencies and immediate:true gives us
 // the same behavior but only triggers when these specific values actually change.
 watch(
-	[() => props.dateFrom, () => props.dateTo, filterIdUsedOnOverview],
+	[() => props.dateFrom, () => props.dateTo, filterIdUsedOnOverview, effectiveShowNulls, effectiveShowOverdue, effectiveAssignedToMe],
 	([from, to, filterId]) => loadPendingTasks(from, to, filterId),
 	{immediate: true},
 )
@@ -300,14 +426,41 @@ watchEffect(() => setTitle(pageTitle.value))
 </script>
 
 <style lang="scss" scoped>
-.show-tasks-options {
+.content-widescreen {
+	max-inline-size: 900px;
+	margin: 0 auto;
+	padding: 1.5rem 1rem;
+}
+
+.options-bar {
 	display: flex;
-	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+	margin-block-end: 1.5rem;
+}
+
+.options-checks {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+}
+
+.page-separator {
+	border: none;
+	border-block-start: 2px solid var(--grey-200);
+	margin-block: 1rem 1.5rem;
+}
+
+.task-card {
+	border-radius: $radius;
 }
 
 .llama-cool {
-	margin: 3rem auto 0;
+	margin: 1.5rem auto 0;
 	display: block;
+	max-block-size: 250px;
+	overflow: visible;
 }
 
 .label-filter-info {
