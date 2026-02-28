@@ -39,6 +39,7 @@
 					<span class="stat"><strong>{{ openCards.length }}</strong> cards</span>
 					<span class="stat"><strong>{{ boardLabels.length }}</strong> labels</span>
 					<span class="stat"><strong>{{ boardChecklists.length }}</strong> checklists</span>
+					<span v-if="boardMembers.length" class="stat"><strong>{{ boardMembers.length }}</strong> members</span>
 				</div>
 			</div>
 
@@ -124,6 +125,14 @@
 						<span>Import comments</span>
 					</label>
 					<span class="option-desc">{{ boardCommentCount }} comments found</span>
+				</div>
+
+				<div v-if="boardMembers.length > 0" class="option-row">
+					<label class="option-label">
+						<input v-model="options.importMembers" type="checkbox">
+						<span>Import card members as labels + description note</span>
+					</label>
+					<span class="option-desc">{{ boardMembers.length }} members found — creates labels for assigned members</span>
 				</div>
 
 				<div class="option-row">
@@ -392,6 +401,7 @@ const options = ref({
 	importChecklists: true,
 	importLabels: true,
 	importComments: true,
+	importMembers: true,
 	markDueCompleteAsDone: true,
 })
 
@@ -472,6 +482,7 @@ const openLists = computed(() => (boardData.value?.lists || []).filter((l: any) 
 const openCards = computed(() => (boardData.value?.cards || []).filter((c: any) => !c.closed))
 const boardLabels = computed(() => (boardData.value?.labels || []).filter((l: any) => l.name))
 const boardChecklists = computed(() => boardData.value?.checklists || [])
+const boardMembers = computed(() => boardData.value?.members || [])
 const boardCommentCount = computed(() => {
 	const actions = boardData.value?.actions || []
 	return actions.filter((a: any) => a.type === 'commentCard').length
@@ -960,6 +971,91 @@ async function startImport() {
 		}
 
 		// ─────────────────────────────────────────────────────
+		// PHASE 2b: Create member labels
+		// Build a map of Trello member ID → Vikunja label ID.
+		// Only creates labels for members actually assigned to
+		// cards in the selected lists.  Collision avoidance:
+		// reuse existing labels by exact title match.
+		// ─────────────────────────────────────────────────────
+		const memberLabelMap = new Map<string, number>()
+		const memberNameMap = new Map<string, string>()  // memberId → display name
+		if (options.value.importMembers && boardMembers.value.length > 0) {
+			// Build name lookup
+			for (const m of boardMembers.value) {
+				memberNameMap.set(m.id, m.fullName || m.username || m.id)
+			}
+
+			// Find which members are actually used on selected cards
+			const usedMemberIds = new Set<string>()
+			const cards = board.cards || []
+			for (const card of cards) {
+				if (!selectedListIds.value.has(card.idList)) continue
+				if (!options.value.importArchived && card.closed) continue
+				for (const mid of (card.idMembers || [])) {
+					usedMemberIds.add(mid)
+				}
+			}
+
+			// Pre-fetch all existing labels once for collision check
+			let existingLabels: any[] = []
+			try {
+				existingLabels = await labelService.getAll({}, {s: ''})
+			} catch {
+				// If fetch fails, we'll just create and handle duplicates
+			}
+			const existingLabelsByTitle = new Map<string, any>()
+			for (const l of existingLabels) {
+				existingLabelsByTitle.set(l.title.toLowerCase(), l)
+			}
+
+			// Also include labels we just created in this import
+			for (const [trelloId, vikunjaId] of labelMap) {
+				const trelloLabel = boardLabels.value.find((l: any) => l.id === trelloId)
+				if (trelloLabel) {
+					existingLabelsByTitle.set(trelloLabel.name.toLowerCase(), { id: vikunjaId, title: trelloLabel.name })
+				}
+			}
+
+			for (const memberId of usedMemberIds) {
+				const name = memberNameMap.get(memberId) || memberId
+				const labelTitle = name
+				updateProgress(`Creating member label "${labelTitle}"...`)
+
+				// Check collision: exact match (case-insensitive)
+				const existing = existingLabelsByTitle.get(labelTitle.toLowerCase())
+				if (existing) {
+					memberLabelMap.set(memberId, existing.id)
+					log('info', `Member label "${labelTitle}" already exists (id=${existing.id}), reusing`)
+					continue
+				}
+
+				try {
+					const label = await labelService.create(new LabelModel({
+						title: labelTitle,
+						hexColor: '#b8b8b8', // neutral grey for member labels
+					}))
+					memberLabelMap.set(memberId, label.id)
+					existingLabelsByTitle.set(labelTitle.toLowerCase(), label)
+					log('success', `Member label: ${labelTitle}`)
+				} catch (e: any) {
+					// Last resort: search by name
+					try {
+						const results = await labelService.getAll({}, {s: labelTitle})
+						const match = results.find((l: any) => l.title.toLowerCase() === labelTitle.toLowerCase())
+						if (match) {
+							memberLabelMap.set(memberId, match.id)
+							log('info', `Member label "${labelTitle}" found via search, reusing`)
+						} else {
+							log('error', `Failed to create member label "${labelTitle}": ${e?.message || e}`)
+						}
+					} catch {
+						log('error', `Failed to create member label "${labelTitle}": ${e?.message || e}`)
+					}
+				}
+			}
+		}
+
+		// ─────────────────────────────────────────────────────
 		// PHASE 3: Create sub-projects for each Trello list
 		// Maps Trello list ID → Vikunja project ID.
 		//
@@ -1308,6 +1404,48 @@ async function startImport() {
 							} catch {
 								// Label assignment might fail silently (duplicate, etc.)
 							}
+						}
+					}
+				}
+
+				// ── Assign member labels + description note ──
+				if (options.value.importMembers && card.idMembers?.length > 0) {
+					const memberNames: string[] = []
+					for (const memberId of card.idMembers) {
+						const name = memberNameMap.get(memberId)
+						if (name) memberNames.push(name)
+
+						const vikunjaLabelId = memberLabelMap.get(memberId)
+						if (vikunjaLabelId) {
+							try {
+								await labelTaskService.create(new LabelTask({
+									taskId: task.id,
+									labelId: vikunjaLabelId,
+								}))
+							} catch {
+								// duplicate label assignment, ignore
+							}
+						}
+					}
+
+					// Append assignee note to description
+					if (memberNames.length > 0) {
+						const currentDesc = task.description || ''
+						const assigneeNote = `\n\n> **Trello assignees:** ${memberNames.join(', ')}`
+						const newDesc = currentDesc + assigneeNote
+						try {
+							const token = getAuthToken()
+							await fetch(`/api/v1/tasks/${task.id}`, {
+								method: 'POST',
+								headers: {
+									'Authorization': 'Bearer ' + token,
+									'Content-Type': 'application/json',
+								},
+								body: JSON.stringify({ description: newDesc.trim() }),
+							})
+							task.description = newDesc.trim()
+						} catch {
+							// Not critical
 						}
 					}
 				}
