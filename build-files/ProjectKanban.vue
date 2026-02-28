@@ -340,7 +340,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, nextTick, ref, watch, toRef} from 'vue'
+import {computed, nextTick, onMounted, ref, watch, toRef} from 'vue'
 import {useRouter} from 'vue-router'
 import {useRouteQuery} from '@vueuse/router'
 import {useI18n} from 'vue-i18n'
@@ -432,16 +432,18 @@ function setDateMode(mode: string) {
 }
 
 // On mount, hydrate from API prefs if available (API takes priority over localStorage)
-import('@/composables/useUserPreferences').then(({useUserPreferences}) => {
-	try {
-		const prefs = useUserPreferences()
-		const apiVal = prefs.get('kanban-date-mode', '')
-		if (apiVal && apiVal !== kanbanDateMode.value) {
-			kanbanDateMode.value = apiVal
-			localStorage.setItem('kanban-date-mode', apiVal)
-		}
-	} catch {}
-}).catch(() => {})
+onMounted(() => {
+	import('@/composables/useUserPreferences').then(({useUserPreferences}) => {
+		try {
+			const prefs = useUserPreferences()
+			const apiVal = prefs.get('kanban-date-mode', '')
+			if (apiVal && apiVal !== kanbanDateMode.value) {
+				kanbanDateMode.value = apiVal
+				localStorage.setItem('kanban-date-mode', apiVal)
+			}
+		} catch {}
+	}).catch(() => {})
+})
 const {handleTaskDropToProject} = useTaskDragToProject()
 const taskPositionService = ref(new TaskPositionService())
 const taskBucketService = ref(new TaskBucketService())
