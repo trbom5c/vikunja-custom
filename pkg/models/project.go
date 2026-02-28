@@ -1278,6 +1278,9 @@ func (p *Project) Delete(s *xorm.Session, a web.Auth) (err error) {
 		return
 	}
 
+	// Clean up auto-task templates that reference this project
+	cleanAutoTaskTemplateProjectRefs(s, p.ID)
+
 	err = events.Dispatch(&ProjectDeletedEvent{
 		Project: fullProject,
 		Doer:    a,
@@ -1370,4 +1373,42 @@ SELECT id FROM descendant_ids`,
 		return fmt.Errorf("failed to update is_archived for descendant projects for parent ID %d to %t: %w", parentProjectID, shouldBeArchived, err)
 	}
 	return nil
+}
+
+// cleanAutoTaskTemplateProjectRefs removes a deleted project ID from all
+// auto-task templates that reference it in their project_ids JSON array.
+func cleanAutoTaskTemplateProjectRefs(s *xorm.Session, deletedProjectID int64) {
+	var templates []*AutoTaskTemplate
+	err := s.Find(&templates)
+	if err != nil {
+		log.Errorf("Error loading auto-task templates for project cleanup: %v", err)
+		return
+	}
+
+	deletedStr := fmt.Sprintf("%d", deletedProjectID)
+	for _, tmpl := range templates {
+		if len(tmpl.ProjectIDs) == 0 {
+			continue
+		}
+		filtered := make([]int64, 0, len(tmpl.ProjectIDs))
+		changed := false
+		for _, pid := range tmpl.ProjectIDs {
+			if pid == deletedProjectID {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, pid)
+		}
+		if !changed {
+			continue
+		}
+
+		tmpl.ProjectIDs = filtered
+		_, err := s.ID(tmpl.ID).Cols("project_ids").Update(tmpl)
+		if err != nil {
+			log.Errorf("Error removing project %s from auto-task template %d: %v", deletedStr, tmpl.ID, err)
+		} else {
+			log.Infof("Removed deleted project %s from auto-task template %d", deletedStr, tmpl.ID)
+		}
+	}
 }

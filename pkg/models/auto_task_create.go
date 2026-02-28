@@ -223,6 +223,16 @@ func createAutoTaskInstance(s *xorm.Session, tmpl *AutoTaskTemplate, u *user.Use
 	var firstTask *Task
 
 	for _, projectID := range projectIDs {
+		// Verify the project still exists before attempting to create a task
+		exists, err := s.Where("id = ?", projectID).Exist(&Project{})
+		if err != nil {
+			return nil, fmt.Errorf("auto-task check project %d: %w", projectID, err)
+		}
+		if !exists {
+			log.Warningf("auto-task create failed for template %d in project %d: Project does not exist [ID: %d]", tmpl.ID, projectID, projectID)
+			continue
+		}
+
 		task := &Task{
 			Title:          tmpl.Title,
 			Description:    tmpl.Description,
