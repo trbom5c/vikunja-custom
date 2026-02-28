@@ -411,7 +411,7 @@ func RemoveProjectBackground(c *echo.Context) error {
 		return err
 	}
 
-	err = project.DeleteBackgroundFileIfExists(s)
+	err = project.DeleteBackgroundFileIfExists()
 	if err != nil {
 		_ = s.Rollback()
 		return err
