@@ -14,6 +14,32 @@
 					:project-id="projectId"
 					@update:modelValue="updateFilters"
 				/>
+				<label class="hide-done-toggle">
+					<input
+						type="checkbox"
+						v-model="hideDoneTasks"
+						@change="onHideDoneToggle"
+					>
+					{{ $t('project.kanban.hideDoneTasks') }}
+				</label>
+				<select
+					class="date-mode-select"
+					:value="kanbanDateMode"
+					@change="setDateMode(($event.target as HTMLSelectElement).value)"
+				>
+					<option value="relative">{{ $t('project.kanban.dateMode.relative') }}</option>
+					<option value="date">{{ $t('project.kanban.dateMode.absolute') }}</option>
+				</select>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="layer-group"
+					:shadow="false"
+					class="mis-2"
+					@click="openCreateFromTemplateModal"
+				>
+					{{ $t('task.template.fromTemplate') }}
+				</XButton>
 			</div>
 		</template>
 
@@ -228,7 +254,11 @@
 												:task="task"
 												:loading="taskUpdating[task.id] ?? false"
 												:project-id="projectId"
+												:date-mode="kanbanDateMode"
 												@taskCompletedRecurring="handleRecurringTaskCompletion"
+												@duplicateTask="openDuplicateTaskModal"
+												@saveAsTemplate="openSaveAsTemplateModal"
+												@taskArchived="handleTaskArchived"
 											/>
 										</div>
 									</template>
@@ -283,6 +313,27 @@
 						</p>
 					</template>
 				</Modal>
+
+				<DuplicateTaskModal
+					:enabled="showDuplicateTaskModal"
+					:task="taskToDuplicate"
+					@close="showDuplicateTaskModal = false"
+					@duplicated="handleTaskDuplicated"
+				/>
+
+				<CreateFromTemplateModal
+					:enabled="showCreateFromTemplateModal"
+					:default-project-id="projectId"
+					@close="showCreateFromTemplateModal = false"
+					@created="handleTaskCreatedFromTemplate"
+				/>
+
+				<SaveAsTemplateModal
+					:enabled="showSaveAsTemplateModal"
+					:task="taskToSaveAsTemplate"
+					@close="showSaveAsTemplateModal = false"
+					@saved="() => {}"
+				/>
 			</div>
 		</template>
 	</ProjectWrapper>
@@ -306,12 +357,16 @@ import {useBaseStore} from '@/stores/base'
 import {useTaskStore} from '@/stores/tasks'
 import {useKanbanStore} from '@/stores/kanban'
 import {useAuthStore} from '@/stores/auth'
+import {useUserPreferences} from '@/composables/useUserPreferences'
 
 import ProjectWrapper from '@/components/project/ProjectWrapper.vue'
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
 import KanbanCard from '@/components/tasks/partials/KanbanCard.vue'
 import Dropdown from '@/components/misc/Dropdown.vue'
 import DropdownItem from '@/components/misc/DropdownItem.vue'
+import DuplicateTaskModal from '@/components/tasks/partials/DuplicateTaskModal.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import SaveAsTemplateModal from '@/components/tasks/partials/SaveAsTemplateModal.vue'
 
 import {
 	type CollapsedBuckets,
@@ -360,8 +415,17 @@ const kanbanStore = useKanbanStore()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
+const userPrefs = useUserPreferences()
 
 const alwaysShowBucketTaskCount = computed(() => authStore.settings.frontendSettings.alwaysShowBucketTaskCount)
+
+// Kanban date display mode — synced via user preferences
+// 'relative' = Vikunja default ("4 days ago"), 'date' = absolute ("Feb 23, 2026")
+const kanbanDateMode = computed(() => userPrefs.get('kanban-date-mode', 'relative'))
+
+function setDateMode(mode: string) {
+	userPrefs.set('kanban-date-mode', mode)
+}
 const {handleTaskDropToProject} = useTaskDragToProject()
 const taskPositionService = ref(new TaskPositionService())
 const taskBucketService = ref(new TaskBucketService())
@@ -380,6 +444,13 @@ const showBucketDeleteModal = ref(false)
 const bucketToDelete = ref(0)
 const bucketTitleEditable = ref(false)
 
+const showDuplicateTaskModal = ref(false)
+const taskToDuplicate = ref<ITask | null>(null)
+
+const showCreateFromTemplateModal = ref(false)
+const showSaveAsTemplateModal = ref(false)
+const taskToSaveAsTemplate = ref<ITask | null>(null)
+
 const newTaskText = ref('')
 const showNewTaskInput = ref<IBucket['id'] | null>(null)
 
@@ -390,6 +461,53 @@ const newTaskInputFocused = ref(false)
 
 const showSetLimitInput = ref(false)
 const collapsedBuckets = ref<CollapsedBuckets>({})
+
+// Hide done tasks toggle — persisted per project in localStorage
+const hideDoneStorageKey = computed(() => `kanban-hide-done-${projectId.value}`)
+const hideDoneTasks = ref(false)
+
+// Load persisted state
+watch(projectId, () => {
+	try {
+		hideDoneTasks.value = localStorage.getItem(hideDoneStorageKey.value) === 'true'
+	} catch {
+		hideDoneTasks.value = false
+	}
+	applyDoneFilter()
+}, {immediate: true})
+
+function applyDoneFilter() {
+	if (hideDoneTasks.value) {
+		// Append done=false filter if not already present
+		const currentFilter = params.value.filter || ''
+		if (!currentFilter.includes('done = false')) {
+			params.value.filter = currentFilter
+				? `(${currentFilter}) && done = false`
+				: 'done = false'
+		}
+	} else {
+		// Remove done=false filter
+		let f = params.value.filter || ''
+		f = f.replace(/\s*&&\s*done\s*=\s*false/, '')
+		f = f.replace(/\((.+)\)\s*&&\s*done\s*=\s*false/, '$1')
+		f = f.replace(/^done\s*=\s*false\s*&&\s*/, '')
+		f = f.replace(/^done\s*=\s*false$/, '')
+		// Clean up leftover wrapping parens from our pattern
+		if (f.startsWith('(') && f.endsWith(')') && !f.includes('&&')) {
+			f = f.slice(1, -1)
+		}
+		params.value.filter = f.trim()
+	}
+}
+
+function onHideDoneToggle() {
+	try {
+		localStorage.setItem(hideDoneStorageKey.value, String(hideDoneTasks.value))
+	} catch { /* ignore */ }
+	applyDoneFilter()
+	// Trigger reload
+	kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+}
 
 // We're using this to show the loading animation only at the task when updating it
 const taskUpdating = ref<{ [id: ITask['id']]: boolean }>({})
@@ -410,6 +528,7 @@ const params = ref<TaskFilterParams>({
 watch([filter, s], ([filterValue, sValue]) => {
 	params.value.filter = filterValue ?? ''
 	params.value.s = sValue ?? ''
+	applyDoneFilter()
 }, { immediate: true })
 
 function updateFilters(newParams: TaskFilterParams) {
@@ -901,6 +1020,45 @@ function collapseBucket(bucket: IBucket) {
 	saveCollapsedBucketState(projectIdWithFallback.value, collapsedBuckets.value)
 }
 
+function openDuplicateTaskModal(task: ITask) {
+	taskToDuplicate.value = task
+	showDuplicateTaskModal.value = true
+}
+
+function handleTaskDuplicated(duplicatedTask: ITask) {
+	// If the task was duplicated into the same project, reload the kanban board to show it
+	if (duplicatedTask.projectId === projectId.value) {
+		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+	}
+}
+
+function openSaveAsTemplateModal(task: ITask) {
+	taskToSaveAsTemplate.value = task
+	showSaveAsTemplateModal.value = true
+}
+
+function handleTaskArchived(task: ITask) {
+	if (hideDoneTasks.value && task.done) {
+		// Task was marked done and we're hiding done tasks — remove from view
+		kanbanStore.removeTaskInBucket(task)
+	} else if (!task.done) {
+		// Task was unarchived — reload to show it in the right place
+		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+	}
+	// Update the task in the store so the card reflects the new state
+	kanbanStore.setTaskInBucket(task)
+}
+
+function openCreateFromTemplateModal() {
+	showCreateFromTemplateModal.value = true
+}
+
+function handleTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === projectId.value) {
+		kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
+	}
+}
+
 function unCollapseBucket(bucket: IBucket) {
 	if (!collapsedBuckets.value[bucket.id]) {
 		return
@@ -920,6 +1078,49 @@ function unCollapseBucket(bucket: IBucket) {
 
 	--loader-border-color: var(--grey-500);
   }
+}
+
+.hide-done-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: .4rem;
+	font-size: .85rem;
+	color: var(--grey-600);
+	cursor: pointer;
+	padding: .25rem .5rem;
+	border-radius: $radius;
+	margin-inline-start: .5rem;
+	user-select: none;
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--grey-100);
+	}
+
+	input[type="checkbox"] {
+		cursor: pointer;
+		margin: 0;
+	}
+}
+
+.date-mode-select {
+	font-size: .85rem;
+	color: var(--grey-600);
+	background: transparent;
+	border: 1px solid var(--grey-300);
+	border-radius: $radius;
+	padding: .15rem .4rem;
+	margin-inline-start: .5rem;
+	cursor: pointer;
+	outline: none;
+
+	&:hover {
+		background: var(--grey-100);
+	}
+
+	&:focus {
+		border-color: var(--primary);
+	}
 }
 </style>
 
