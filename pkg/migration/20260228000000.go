@@ -49,7 +49,7 @@ func init() {
 
 			for _, col := range columns {
 				// Check if the correct column already exists
-				exists, err := columnExists(tx, "auto_task_templates", col.name)
+				exists, err := autoTaskColumnExists(tx, "auto_task_templates", col.name)
 				if err != nil {
 					return fmt.Errorf("check column %s: %w", col.name, err)
 				}
@@ -60,7 +60,7 @@ func init() {
 
 				// Check if a mangled version exists that we can rename
 				if col.fallback != "" {
-					mangledExists, err := columnExists(tx, "auto_task_templates", col.fallback)
+					mangledExists, err := autoTaskColumnExists(tx, "auto_task_templates", col.fallback)
 					if err != nil {
 						return fmt.Errorf("check mangled column %s: %w", col.fallback, err)
 					}
@@ -103,8 +103,8 @@ func init() {
 	})
 }
 
-// columnExists checks whether a column exists in a table (MySQL, SQLite, PostgreSQL).
-func columnExists(tx *xorm.Engine, table, column string) (bool, error) {
+// autoTaskColumnExists checks whether a column exists in a table (MySQL, SQLite, PostgreSQL).
+func autoTaskColumnExists(tx *xorm.Engine, table, column string) (bool, error) {
 	// Try MySQL / MariaDB first
 	rows, err := tx.Query(
 		"SELECT COUNT(*) AS cnt FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
