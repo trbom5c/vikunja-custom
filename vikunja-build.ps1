@@ -585,6 +585,18 @@ if (Test-Path $bgFile) {
     }
 }
 
+# --- Fix registerServiceWorker.ts: disable SW registration ---
+# The upstream service worker (sw.js) fails evaluation when custom patches
+# alter the Vite chunk graph. Since we self-host behind Cloudflare, the SW
+# provides no benefit. Replace the file with a no-op to suppress the error toast.
+$swRegFile = Join-Path $SOURCE "frontend\src\registerServiceWorker.ts"
+if (Test-Path $swRegFile) {
+    $swContent = "// Service worker registration disabled for custom build`n// (upstream sw.js fails evaluation with patched chunk graph)`nexport {}`n"
+    Write-Utf8NoBom $swRegFile $swContent
+    Write-Host "  FIXED  registerServiceWorker.ts (disabled SW registration)" -ForegroundColor DarkGray
+    $fixCount++
+}
+
 Write-Host ""
 Write-Host "  Upstream compat: $fixCount total fixes" -ForegroundColor Gray
 
