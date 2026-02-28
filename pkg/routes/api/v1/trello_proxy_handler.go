@@ -17,21 +17,29 @@
 package v1
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"regexp"
 
 	"github.com/labstack/echo/v5"
 )
 
+// trelloAttURLPattern extracts cardId and attachmentId from a Trello attachment URL.
+var trelloAttURLPattern = regexp.MustCompile(
+	`https://(?:api\.)?trello\.com/1/cards/([a-f0-9]+)/attachments/([a-f0-9]+)`,
+)
+
 // TrelloProxyDownload proxies a download request to the Trello API,
 // avoiding CORS issues when the browser fetches Trello attachments.
-// The frontend sends the Trello URL + credentials and this endpoint
-// streams the file back.
+//
+// Two-step flow:
+//  1. Fetch attachment metadata from Trello API to get the pre-signed download URL
+//  2. Fetch the actual file from that pre-signed URL (no auth needed)
 //
 // POST /api/v1/trello/proxy-download
-// Body: { "url": "https://api.trello.com/1/cards/.../download/file.jpg", "key": "...", "token": "..." }
+// Body: { "url": "https://api.trello.com/1/cards/.../attachments/.../download/file.jpg", "key": "...", "token": "..." }
 func TrelloProxyDownload(c *echo.Context) error {
 	var req struct {
 		URL   string `json:"url"`
@@ -46,44 +54,72 @@ func TrelloProxyDownload(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "url, key, and token are required")
 	}
 
-	// Only allow proxying to Trello API domains
-	if !strings.HasPrefix(req.URL, "https://api.trello.com/1/cards") &&
-		!strings.HasPrefix(req.URL, "https://trello.com/1/cards") {
+	// Extract cardId and attachmentId from the URL
+	matches := trelloAttURLPattern.FindStringSubmatch(req.URL)
+	if len(matches) < 3 {
 		return echo.NewHTTPError(http.StatusBadRequest, "url must be a Trello card attachment URL")
 	}
+	cardID := matches[1]
+	attachmentID := matches[2]
 
-	// Append auth to the Trello URL
-	separator := "?"
-	if strings.Contains(req.URL, "?") {
-		separator = "&"
-	}
-	trelloURL := fmt.Sprintf("%s%skey=%s&token=%s", req.URL, separator, req.Key, req.Token)
+	// Step 1: Fetch attachment metadata to get the pre-signed download URL
+	metaURL := fmt.Sprintf(
+		"https://api.trello.com/1/cards/%s/attachments/%s?key=%s&token=%s",
+		cardID, attachmentID, req.Key, req.Token,
+	)
 
-	// Fetch from Trello
-	resp, err := http.Get(trelloURL) // nolint:gosec
+	metaResp, err := http.Get(metaURL) // nolint:gosec
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch from Trello: %v", err))
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to fetch attachment metadata: %v", err))
 	}
-	defer resp.Body.Close()
+	defer metaResp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return echo.NewHTTPError(resp.StatusCode, fmt.Sprintf("Trello returned %d: %s", resp.StatusCode, string(body)))
+	if metaResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(metaResp.Body, 1024))
+		return echo.NewHTTPError(metaResp.StatusCode, fmt.Sprintf("Trello metadata %d: %s", metaResp.StatusCode, string(body)))
+	}
+
+	var meta struct {
+		URL      string `json:"url"`
+		MimeType string `json:"mimeType"`
+		Name     string `json:"name"`
+	}
+	if err := json.NewDecoder(metaResp.Body).Decode(&meta); err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to parse attachment metadata: %v", err))
+	}
+
+	if meta.URL == "" {
+		return echo.NewHTTPError(http.StatusBadGateway, "Trello attachment metadata has no download URL")
+	}
+
+	// Step 2: Fetch the actual file from the pre-signed URL
+	fileResp, err := http.Get(meta.URL) // nolint:gosec
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("failed to download file: %v", err))
+	}
+	defer fileResp.Body.Close()
+
+	if fileResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(fileResp.Body, 1024))
+		return echo.NewHTTPError(fileResp.StatusCode, fmt.Sprintf("file download %d: %s", fileResp.StatusCode, string(body)))
 	}
 
 	// Stream the response back
-	contentType := resp.Header.Get("Content-Type")
+	contentType := fileResp.Header.Get("Content-Type")
 	if contentType == "" {
-		contentType = "application/octet-stream"
+		if meta.MimeType != "" {
+			contentType = meta.MimeType
+		} else {
+			contentType = "application/octet-stream"
+		}
 	}
 
-	// Set additional headers before streaming
-	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+	if cd := fileResp.Header.Get("Content-Disposition"); cd != "" {
 		c.Response().Header().Set("Content-Disposition", cd)
 	}
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
+	if cl := fileResp.Header.Get("Content-Length"); cl != "" {
 		c.Response().Header().Set("Content-Length", cl)
 	}
 
-	return c.Stream(http.StatusOK, contentType, resp.Body)
+	return c.Stream(http.StatusOK, contentType, fileResp.Body)
 }
