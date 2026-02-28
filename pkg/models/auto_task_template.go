@@ -17,6 +17,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -187,8 +188,6 @@ func (a *AutoTaskTemplate) Create(s *xorm.Session, auth web.Auth) error {
 
 // Update saves changes to an auto-task template.
 func (a *AutoTaskTemplate) Update(s *xorm.Session, _ web.Auth) error {
-	fmt.Printf("[AutoTask Update] ID=%d ProjectIDs=%v LabelIDs=%v Title=%q\n", a.ID, a.ProjectIDs, a.LabelIDs, a.Title)
-
 	// If the user changed the generate-at time, update next_due_at
 	// to preserve the new time-of-day while keeping the same date.
 	if a.NextDueAt != nil {
@@ -202,19 +201,34 @@ func (a *AutoTaskTemplate) Update(s *xorm.Session, _ web.Auth) error {
 		a.NextDueAt = &updated
 	}
 
-	affected, err := s.ID(a.ID).Cols(
-		"title", "description", "project_ids", "priority", "hex_color",
-		"label_ids", "assignee_ids",
+	// Update scalar fields via xorm (exclude JSON slice fields — xorm Cols() can't map them)
+	_, err := s.ID(a.ID).Cols(
+		"title", "description", "priority", "hex_color",
 		"interval_value", "interval_unit", "start_date", "end_date",
 		"active", "next_due_at",
 	).Update(a)
-	fmt.Printf("[AutoTask Update] affected=%d err=%v\n", affected, err)
+	if err != nil {
+		return err
+	}
 
-	// Debug: read back to verify
-	verify := &AutoTaskTemplate{}
-	has, _ := s.ID(a.ID).Get(verify)
-	fmt.Printf("[AutoTask Verify] has=%v ProjectIDs=%v Title=%q\n", has, verify.ProjectIDs, verify.Title)
+	// Update JSON slice fields via raw SQL (xorm Cols silently skips these)
+	projectJSON, _ := json.Marshal(a.ProjectIDs)
+	if a.ProjectIDs == nil {
+		projectJSON = []byte("null")
+	}
+	labelJSON, _ := json.Marshal(a.LabelIDs)
+	if a.LabelIDs == nil {
+		labelJSON = []byte("null")
+	}
+	assigneeJSON, _ := json.Marshal(a.AssigneeIDs)
+	if a.AssigneeIDs == nil {
+		assigneeJSON = []byte("null")
+	}
 
+	_, err = s.Exec(
+		"UPDATE auto_task_templates SET project_ids = ?, label_ids = ?, assignee_ids = ? WHERE id = ?",
+		string(projectJSON), string(labelJSON), string(assigneeJSON), a.ID,
+	)
 	return err
 }
 
