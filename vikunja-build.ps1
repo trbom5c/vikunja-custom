@@ -605,6 +605,36 @@ if (Test-Path $swRegFile) {
     }
 }
 
+# --- Fix sw.ts: workbox version mismatch ---
+# Upstream sw.ts hardcodes 'v7.3.0' but workbox-cli is 7.4.0, so
+# copyLibraries creates workbox-v7.4.0/ while the SW looks for workbox-v7.3.0/.
+# Dynamically read the installed workbox-cli version and patch sw.ts to match.
+$swFile = Join-Path $SOURCE "frontend\src\sw.ts"
+if (Test-Path $swFile) {
+    $pkgJson = Join-Path $SOURCE "frontend\package.json"
+    $wbCliVersion = ""
+    if (Test-Path $pkgJson) {
+        $pkgContent = Get-Content $pkgJson -Raw | ConvertFrom-Json
+        if ($pkgContent.devDependencies.'workbox-cli') {
+            $wbCliVersion = $pkgContent.devDependencies.'workbox-cli'
+        }
+    }
+    if ($wbCliVersion) {
+        $swContent = [System.IO.File]::ReadAllText($swFile)
+        if ($swContent -match "workboxVersion\s*=\s*'v([^']+)'") {
+            $currentVer = $Matches[1]
+            if ($currentVer -ne $wbCliVersion) {
+                $swContent = $swContent.Replace("'v$currentVer'", "'v$wbCliVersion'")
+                Write-Utf8NoBom $swFile $swContent
+                Write-Host "  FIXED  sw.ts (workbox version v$currentVer -> v$wbCliVersion)" -ForegroundColor DarkGray
+                $fixCount++
+            } else {
+                Write-Host "  OK     sw.ts (workbox v$currentVer)" -ForegroundColor DarkGray
+            }
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "  Upstream compat: $fixCount total fixes" -ForegroundColor Gray
 
