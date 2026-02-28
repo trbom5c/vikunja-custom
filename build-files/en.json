@@ -1496,6 +1496,7 @@
 	"task.autoTask.triggeredSuccess": "Task created and sent to project.",
 	"task.autoTask.defaultProject": "Default project",
 	"task.autoTask.nextDue": "Next",
+	"task.autoTask.lastFired": "Last fired",
 	"task.autoTask.generationLog": "Generation log",
 	"task.autoTask.logManual": "Manually triggered",
 	"task.autoTask.logSystem": "Auto-generated",

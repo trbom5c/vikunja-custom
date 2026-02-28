@@ -101,10 +101,20 @@
 					<span
 						v-if="tmpl.next_due_at"
 						class="meta-item"
-						:class="{'is-overdue': isOverdue(tmpl.next_due_at)}"
+						:class="{
+							'is-paused-date': !tmpl.active,
+							'is-today': tmpl.active && isToday(tmpl.next_due_at),
+							'is-upcoming': tmpl.active && !isToday(tmpl.next_due_at) && !isOverdue(tmpl.next_due_at),
+							'is-overdue': tmpl.active && isOverdue(tmpl.next_due_at) && !isToday(tmpl.next_due_at),
+						}"
 					>
 						<Icon :icon="['far', 'calendar-alt']" class="meta-icon" />
-						{{ $t('task.autoTask.nextDue') }}: {{ formatDate(tmpl.next_due_at) }}
+						<template v-if="!tmpl.active">
+							{{ $t('task.autoTask.lastFired') || 'Last fired' }}: {{ formatDate(tmpl.last_created_at || tmpl.next_due_at) }}
+						</template>
+						<template v-else>
+							{{ $t('task.autoTask.nextDue') }}: {{ formatDate(tmpl.next_due_at) }}
+						</template>
 					</span>
 				</div>
 
@@ -680,6 +690,15 @@ function isOverdue(dateStr: string | null): boolean {
 	return new Date(dateStr) < new Date()
 }
 
+function isToday(dateStr: string | null): boolean {
+	if (!dateStr) return false
+	const d = new Date(dateStr)
+	const now = new Date()
+	return d.getFullYear() === now.getFullYear()
+		&& d.getMonth() === now.getMonth()
+		&& d.getDate() === now.getDate()
+}
+
 function openLogModal(tmpl: IAutoTaskTemplate) {
 	logTemplate.value = tmpl
 	showLogModal.value = true
@@ -966,6 +985,20 @@ defineExpose({openCreate})
 	gap: .3rem;
 
 	&.is-overdue {
+		color: var(--warning);
+		font-weight: 600;
+	}
+
+	&.is-today {
+		color: #e6b800;
+		font-weight: 600;
+	}
+
+	&.is-upcoming {
+		color: var(--success);
+	}
+
+	&.is-paused-date {
 		color: var(--danger);
 		font-weight: 600;
 	}
