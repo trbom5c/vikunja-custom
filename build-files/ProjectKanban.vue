@@ -498,7 +498,7 @@ const params = ref<TaskFilterParams>({
 const taskUpdating = ref<{ [id: ITask['id']]: boolean }>({})
 const oneTaskUpdating = ref(false)
 
-const hideDoneTasks = ref(false)
+const hideDoneTasks = ref(true)
 
 function applyDoneFilter() {
 	if (hideDoneTasks.value) {
@@ -527,9 +527,11 @@ function applyDoneFilter() {
 // Load persisted state
 watch(projectId, () => {
 	try {
-		hideDoneTasks.value = localStorage.getItem(hideDoneStorageKey.value) === 'true'
+		const stored = localStorage.getItem(hideDoneStorageKey.value)
+		// Default to true (hide done) when no preference has been saved yet
+		hideDoneTasks.value = stored === null ? true : stored === 'true'
 	} catch {
-		hideDoneTasks.value = false
+		hideDoneTasks.value = true
 	}
 	applyDoneFilter()
 }, {immediate: true})
@@ -1088,6 +1090,13 @@ function unCollapseBucket(bucket: IBucket) {
 </script>
 
 <style lang="scss" scoped>
+.filter-container {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: .25rem;
+}
+
 .control.is-loading {
   &::after {
     inset-block-start: 30%;
