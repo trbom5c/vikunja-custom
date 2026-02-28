@@ -33,7 +33,9 @@ import (
 // Rules:
 //   - Only one open (not done) instance per template can exist at a time
 //   - If the previous instance isn't done, no new one is created (it just goes overdue)
-//   - next_due_at is recalculated from the last completion time, not creation time
+//   - next_due_at is always advanced after the cron fires — whether a task was
+//     created, skipped (open task exists), or completed — so the UI always shows
+//     the next future schedule time
 func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 	now := time.Now()
 
@@ -55,12 +57,17 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 		}
 
 		// Check: does an open (not done) task already exist for this template?
-		// If so, skip — the user needs to complete it first.
+		// If so, skip creation — the user needs to complete it first.
+		// But still advance next_due_at so the UI shows the next scheduled time.
 		openCount, err := s.Where("auto_template_id = ? AND done = ?", tmpl.ID, false).Count(&Task{})
 		if err != nil {
 			return nil, err
 		}
 		if openCount > 0 {
+			// Advance next_due_at past now so display shows future schedule
+			nextDue := advanceFromTime(now, tmpl.IntervalValue, tmpl.IntervalUnit)
+			tmpl.NextDueAt = &nextDue
+			_, _ = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
 			continue
 		}
 
@@ -120,6 +127,11 @@ func CheckAndCreateAutoTasks(s *xorm.Session, u *user.User) ([]*Task, error) {
 		}
 		if task != nil {
 			created = append(created, task)
+
+			// Advance next_due_at so the UI shows the next scheduled time
+			nextDue := advanceFromTime(now, tmpl.IntervalValue, tmpl.IntervalUnit)
+			tmpl.NextDueAt = &nextDue
+			_, _ = s.ID(tmpl.ID).Cols("next_due_at").Update(tmpl)
 		}
 	}
 
