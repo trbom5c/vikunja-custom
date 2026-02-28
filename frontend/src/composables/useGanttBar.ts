@@ -12,7 +12,12 @@ export interface GanttBarModel {
 		hasActualDates?: boolean
 		dateType?: GanttBarDateType
 		isDone?: boolean
+		isAutoGen?: boolean
+		projectName?: string
 		task?: unknown
+		isOverdue?: boolean
+		originalStart?: Date
+		originalEnd?: Date
 	}
 }
 export interface UseGanttBarOptions {
