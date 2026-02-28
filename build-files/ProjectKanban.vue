@@ -482,17 +482,23 @@ const collapsedBuckets = ref<CollapsedBuckets>({})
 
 // Hide done tasks toggle — persisted per project in localStorage
 const hideDoneStorageKey = computed(() => `kanban-hide-done-${projectId.value}`)
-const hideDoneTasks = ref(false)
+// URL-synchronized filter parameters (declared early — watchers below read params immediately)
+const filter = useRouteQuery('filter')
+const s = useRouteQuery('s')
 
-// Load persisted state
-watch(projectId, () => {
-	try {
-		hideDoneTasks.value = localStorage.getItem(hideDoneStorageKey.value) === 'true'
-	} catch {
-		hideDoneTasks.value = false
-	}
-	applyDoneFilter()
-}, {immediate: true})
+const params = ref<TaskFilterParams>({
+	sort_by: [],
+	order_by: [],
+	filter: '',
+	filter_include_nulls: false,
+	s: '',
+})
+
+// We're using this to show the loading animation only at the task when updating it
+const taskUpdating = ref<{ [id: ITask['id']]: boolean }>({})
+const oneTaskUpdating = ref(false)
+
+const hideDoneTasks = ref(false)
 
 function applyDoneFilter() {
 	if (hideDoneTasks.value) {
@@ -518,6 +524,22 @@ function applyDoneFilter() {
 	}
 }
 
+// Load persisted state
+watch(projectId, () => {
+	try {
+		hideDoneTasks.value = localStorage.getItem(hideDoneStorageKey.value) === 'true'
+	} catch {
+		hideDoneTasks.value = false
+	}
+	applyDoneFilter()
+}, {immediate: true})
+
+watch([filter, s], ([filterValue, sValue]) => {
+	params.value.filter = filterValue ?? ''
+	params.value.s = sValue ?? ''
+	applyDoneFilter()
+}, { immediate: true })
+
 function onHideDoneToggle() {
 	try {
 		localStorage.setItem(hideDoneStorageKey.value, String(hideDoneTasks.value))
@@ -526,28 +548,6 @@ function onHideDoneToggle() {
 	// Trigger reload
 	kanbanStore.loadBucketsForProject(projectId.value, props.viewId, params.value)
 }
-
-// We're using this to show the loading animation only at the task when updating it
-const taskUpdating = ref<{ [id: ITask['id']]: boolean }>({})
-const oneTaskUpdating = ref(false)
-
-// URL-synchronized filter parameters
-const filter = useRouteQuery('filter')
-const s = useRouteQuery('s')
-
-const params = ref<TaskFilterParams>({
-	sort_by: [],
-	order_by: [],
-	filter: '',
-	filter_include_nulls: false,
-	s: '',
-})
-
-watch([filter, s], ([filterValue, sValue]) => {
-	params.value.filter = filterValue ?? ''
-	params.value.s = sValue ?? ''
-	applyDoneFilter()
-}, { immediate: true })
 
 function updateFilters(newParams: TaskFilterParams) {
 	// Update all params
