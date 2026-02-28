@@ -14,6 +14,31 @@
 					:project-id="projectId"
 					@update:modelValue="prepareFiltersAndLoadTasks()"
 				/>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="layer-group"
+					:shadow="false"
+					class="mis-2"
+					@click="showCreateFromTemplateModal = true"
+				>
+					{{ $t('task.template.fromTemplate') }}
+				</XButton>
+				<XButton
+					v-if="canWrite"
+					variant="secondary"
+					icon="link"
+					:shadow="false"
+					class="mis-2"
+					@click="showCreateFromChainModal = true"
+				>
+					{{ $t('task.chain.createFromChain') }}
+				</XButton>
+				<SubprojectFilter
+					:project-id="projectId"
+					@update:includeSubprojects="onSubprojectToggle"
+					@update:excludeProjectIds="onExcludeChange"
+				/>
 			</div>
 		</template>
 
@@ -95,6 +120,19 @@
 			</div>
 		</template>
 	</ProjectWrapper>
+
+	<CreateFromTemplateModal
+		:enabled="showCreateFromTemplateModal"
+		:default-project-id="projectId"
+		@close="showCreateFromTemplateModal = false"
+		@created="handleTaskCreatedFromTemplate"
+	/>
+	<CreateFromChainModal
+		:enabled="showCreateFromChainModal"
+		:project-id="projectId"
+		@close="showCreateFromChainModal = false"
+		@created="loadTasks(1)"
+	/>
 </template>
 
 
@@ -107,6 +145,9 @@ import ButtonLink from '@/components/misc/ButtonLink.vue'
 import AddTask from '@/components/tasks/AddTask.vue'
 import SingleTaskInProject from '@/components/tasks/partials/SingleTaskInProject.vue'
 import FilterPopup from '@/components/project/partials/FilterPopup.vue'
+import SubprojectFilter from '@/components/project/partials/SubprojectFilter.vue'
+import CreateFromTemplateModal from '@/components/tasks/partials/CreateFromTemplateModal.vue'
+import CreateFromChainModal from '@/components/tasks/partials/CreateFromChainModal.vue'
 import Nothing from '@/components/misc/Nothing.vue'
 import Pagination from '@/components/misc/Pagination.vue'
 import {ALPHABETICAL_SORT} from '@/components/project/partials/Filters.vue'
@@ -138,8 +179,30 @@ const projectId = toRef(props, 'projectId')
 defineOptions({name: 'List'})
 
 const ctaVisible = ref(false)
+const showCreateFromTemplateModal = ref(false)
+const showCreateFromChainModal = ref(false)
 
 const drag = ref(false)
+
+const subprojectParams = ref<Record<string, unknown>>({})
+
+function onSubprojectToggle(enabled: boolean) {
+	if (enabled) {
+		subprojectParams.value = {...subprojectParams.value, include_subprojects: true}
+	} else {
+		const {include_subprojects, exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+}
+
+function onExcludeChange(ids: string) {
+	if (ids) {
+		subprojectParams.value = {...subprojectParams.value, exclude_project_ids: ids}
+	} else {
+		const {exclude_project_ids, ...rest} = subprojectParams.value
+		subprojectParams.value = rest
+	}
+}
 
 const {
 	tasks: allTasks,
@@ -156,6 +219,7 @@ const {
 	() => projectId.value === -1
 		? ['comment_count', 'is_unread']
 		: ['subtasks', 'comment_count', 'is_unread'],
+	() => subprojectParams.value,
 )
 
 const taskPositionService = ref(new TaskPositionService())
@@ -211,6 +275,12 @@ const addTaskRef = ref<typeof AddTask | null>(null)
 
 function focusNewTaskInput() {
 	addTaskRef.value?.focusTaskInput()
+}
+
+function handleTaskCreatedFromTemplate(createdTask: ITask) {
+	if (createdTask.projectId === projectId.value) {
+		loadTasks()
+	}
 }
 
 function updateTaskList(task: ITask) {

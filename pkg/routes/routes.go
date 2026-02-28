@@ -228,7 +228,7 @@ func RegisterRoutes(e *echo.Echo) {
 				return matchCORSOrigin(origin, allowedOrigins)
 			},
 			AllowCredentials: true,
-			MaxAge:           config.CorsMaxAge.GetInt(),
+			MaxAge: config.CorsMaxAge.GetInt(),
 			Skipper: func(context *echo.Context) bool {
 				// Since it is not possible to register this middleware just for the api group,
 				// we just disable it when for caldav requests.
@@ -378,6 +378,9 @@ func registerAPIRoutes(a *echo.Group) {
 	u.POST("/settings/avatar", apiv1.ChangeUserAvatarProvider)
 	u.PUT("/settings/avatar/upload", apiv1.UploadAvatar)
 	u.POST("/settings/general", apiv1.UpdateGeneralUserSettings)
+	u.GET("/settings/preferences", apiv1.GetUserPreferences)
+	u.POST("/settings/preferences", apiv1.SaveUserPreferences)
+	u.DELETE("/settings/preferences/:key", apiv1.DeleteUserPreference)
 	u.POST("/export/request", apiv1.RequestUserDataExport)
 	u.POST("/export/download", apiv1.DownloadUserDataExport)
 	u.GET("/export", apiv1.GetUserExportStatus)
@@ -457,6 +460,72 @@ func registerAPIRoutes(a *echo.Group) {
 		},
 	}
 	a.PUT("/projects/:projectid/duplicate", projectDuplicateHandler.CreateWeb)
+
+	taskDuplicateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskDuplicate{}
+		},
+	}
+	a.PUT("/tasks/:task/duplicate", taskDuplicateHandler.CreateWeb)
+
+	taskTemplateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskTemplate{}
+		},
+	}
+	a.GET("/tasktemplates", taskTemplateHandler.ReadAllWeb)
+	a.GET("/tasktemplates/:template", taskTemplateHandler.ReadOneWeb)
+	a.PUT("/tasktemplates", taskTemplateHandler.CreateWeb)
+	a.POST("/tasktemplates/:template", taskTemplateHandler.UpdateWeb)
+	a.DELETE("/tasktemplates/:template", taskTemplateHandler.DeleteWeb)
+
+	taskFromTemplateHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskFromTemplate{}
+		},
+	}
+	a.PUT("/tasktemplates/:template/tasks", taskFromTemplateHandler.CreateWeb)
+
+	// --- Task Chains ---
+	taskChainHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskChain{}
+		},
+	}
+	a.GET("/taskchains", taskChainHandler.ReadAllWeb)
+	a.GET("/taskchains/:chain", taskChainHandler.ReadOneWeb)
+	a.PUT("/taskchains", taskChainHandler.CreateWeb)
+	a.POST("/taskchains/:chain", taskChainHandler.UpdateWeb)
+	a.DELETE("/taskchains/:chain", taskChainHandler.DeleteWeb)
+
+	taskFromChainHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.TaskFromChain{}
+		},
+	}
+	a.PUT("/taskchains/:chain/tasks", taskFromChainHandler.CreateWeb)
+
+	// Chain step attachments
+	a.PUT("/chainsteps/:step/attachments", apiv1.UploadChainStepAttachment)
+	a.DELETE("/chainsteps/:step/attachments/:attachment", apiv1.DeleteChainStepAttachment)
+
+	// --- Auto-Generated Tasks ---
+	autoTaskHandler := &handler.WebHandler{
+		EmptyStruct: func() handler.CObject {
+			return &models.AutoTaskTemplate{}
+		},
+	}
+	a.GET("/autotasks", autoTaskHandler.ReadAllWeb)
+	a.GET("/autotasks/:autotask", autoTaskHandler.ReadOneWeb)
+	a.PUT("/autotasks", autoTaskHandler.CreateWeb)
+	a.POST("/autotasks/:autotask", autoTaskHandler.UpdateWeb)
+	a.DELETE("/autotasks/:autotask", autoTaskHandler.DeleteWeb)
+
+	// Auto-task manual trigger and auto-check
+	a.POST("/autotasks/:autotask/trigger", apiv1.TriggerAutoTask)
+	a.POST("/autotasks/check", apiv1.CheckAutoTasks)
+	a.POST("/autotasks/:autotask/log/truncate", apiv1.TruncateAutoTaskLog)
+	a.POST("/autotasks/:autotask/reset", apiv1.HandleResetAutoTaskSchedule)
 
 	taskHandler := &handler.WebHandler{
 		EmptyStruct: func() handler.CObject {

@@ -158,6 +158,11 @@ const router = createRouter({
 						code: route.query.code as string,
 					}),
 				},
+				{
+					path: '/import/trello-json',
+					name: 'import.trello-json',
+					component: () => import('@/views/migrate/TrelloImport.vue'),
+				},
 			],
 		},
 		{
@@ -367,6 +372,11 @@ const router = createRouter({
 			path: '/labels',
 			name: 'labels.index',
 			component: () => import('@/views/labels/ListLabels.vue'),
+		},
+		{
+			path: '/templates',
+			name: 'templates.index',
+			component: () => import('@/views/templates/ListTemplates.vue'),
 		},
 		{
 			path: '/labels/new',
